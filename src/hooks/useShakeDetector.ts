@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { haptics } from '../lib/haptics';
 
 type PermissionState = 'idle' | 'granted' | 'denied' | 'unavailable';
 
@@ -64,7 +65,7 @@ export function useShakeDetector(initialThreshold = 15) {
 
     if (isRisingEdge && now >= cooldownUntilRef.current) {
       cooldownUntilRef.current = now + DEBOUNCE_MS;
-      navigator.vibrate?.(200);
+      haptics.shake();
       const ts = Date.now();
       setLastShakeAt(ts);
       setShakeCount((c) => c + 1);

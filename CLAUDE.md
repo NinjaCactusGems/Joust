@@ -52,3 +52,18 @@ The accelerometer hook (`src/hooks/useShakeDetector.ts`) compares smoothed accel
 | Forgiving | 12 m/s²   | Needs a deliberate shove.     |
 
 Units are m/s² (acceleration magnitude), matching the `DeviceMotionEvent.acceleration` API. The slider in `App.tsx` and any future per-game-mode defaults should anchor on these values.
+
+### Game flow
+
+A round runs through four server-owned phases (`party/server.ts`), with the client overlay in `src/components/Game.tsx`:
+
+1. **Lobby** — players join and ready up. Toggling "I'm ready" also requests device-motion permission (iOS needs the request to come from a user gesture).
+2. **Ready** — a 5-second countdown synced via `readyEndsAt`. Small haptic tick each second, a larger buzz on "Go". Neutral staff background.
+3. **Jousting** — a "hold still" nerve game. Each phone watches its own motion at the **Normal/medium** threshold (7 m/s²) via `useShakeDetector(7)`; a spike reports `eliminate` to the server. Your screen is full-screen **olive** while in, **red** ("OUT") once eliminated — readable across a room. Last player standing wins.
+4. **Winner** — shows the survivor's name. Any player can tap a smiley (💩 / ❤️ / 🕺); each tap re-broadcasts a transient `reaction` event that bursts emoji particles on every screen (no counters). After 10 seconds (`winnerEndsAt`) everyone returns to the lobby, un-readied.
+
+Notes:
+- The server is authoritative for all transitions and timing. Clients only send `eliminate` (self) and `reaction`.
+- Solo (1+) play is allowed; a one-player room resolves immediately on jousting start.
+- A player who joins mid-round is marked eliminated (spectates) until the next reset.
+- Vibration patterns live in `src/lib/haptics.ts`.

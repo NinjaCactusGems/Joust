@@ -3,14 +3,18 @@ import usePartySocket from 'partysocket/react';
 import { QRCodeSVG } from 'qrcode.react';
 import { generateRoomCode, normalizeRoomCode } from '../lib/roomCode';
 import { generateRandomName } from '../lib/names';
-import { Match } from './Match';
+import { Game, type Phase, type Reaction } from './Game';
+import { useShakeDetector } from '../hooks/useShakeDetector';
 
 const PARTY_HOST = import.meta.env.VITE_PARTY_HOST || 'localhost:1999';
 
 const PLAYER_ID_KEY = 'joust:playerId';
 const PLAYER_NAME_KEY = 'joust:playerName';
 
-type Player = { id: string; name: string; ready: boolean };
+// Jousting watches motion at the Normal/medium threshold (7 m/s², per CLAUDE.md).
+const JOUST_THRESHOLD = 7;
+
+type Player = { id: string; name: string; ready: boolean; eliminated: boolean };
 
 type LobbyState =
   | { phase: 'idle' }
@@ -130,14 +134,25 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
   const myName = useRef(getPlayerName());
 
   const [players, setPlayers] = useState<Player[]>([]);
-  const [phase, setPhase] = useState<'lobby' | 'match'>('lobby');
-  const [matchEndsAt, setMatchEndsAt] = useState<number | null>(null);
+  const [phase, setPhase] = useState<Phase>('lobby');
+  const [readyEndsAt, setReadyEndsAt] = useState<number | null>(null);
+  const [winnerEndsAt, setWinnerEndsAt] = useState<number | null>(null);
+  const [winnerId, setWinnerId] = useState<string | null>(null);
+  const [lastReaction, setLastReaction] = useState<{
+    reaction: Reaction;
+    at: number;
+  } | null>(null);
   const [status, setStatus] = useState<'connecting' | 'open' | 'closed'>(
     'connecting',
   );
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState('');
+
+  // One motion session for the whole room, started on the "I'm ready" gesture
+  // (iOS requires the permission request to come from a user gesture). The
+  // Game overlay reads lastShakeAt from this to detect "moved too fast".
+  const detector = useShakeDetector(JOUST_THRESHOLD);
 
   const socket = usePartySocket({
     host: PARTY_HOST,
@@ -154,14 +169,21 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
       try {
         const data = JSON.parse(event.data) as Partial<{
           type: string;
-          phase: 'lobby' | 'match';
-          matchEndsAt: number | null;
+          phase: Phase;
+          readyEndsAt: number | null;
+          winnerEndsAt: number | null;
+          winnerId: string | null;
           players: Player[];
+          reaction: Reaction;
         }>;
         if (data.type === 'state') {
-          setPhase(data.phase === 'match' ? 'match' : 'lobby');
-          setMatchEndsAt(data.matchEndsAt ?? null);
+          setPhase(data.phase ?? 'lobby');
+          setReadyEndsAt(data.readyEndsAt ?? null);
+          setWinnerEndsAt(data.winnerEndsAt ?? null);
+          setWinnerId(data.winnerId ?? null);
           setPlayers(Array.isArray(data.players) ? data.players : []);
+        } else if (data.type === 'reaction' && data.reaction) {
+          setLastReaction({ reaction: data.reaction, at: Date.now() });
         }
       } catch {
         // ignore non-JSON frames
@@ -220,8 +242,27 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
     setEditing(false);
   };
 
-  if (phase === 'match' && matchEndsAt) {
-    return <Match endsAt={matchEndsAt} />;
+  // Enabling motion needs a user gesture (iOS); the ready checkbox is one.
+  const onToggleReady = (ready: boolean) => {
+    if (ready) void detector.start();
+    send({ type: 'toggleReady', ready });
+  };
+
+  if (phase !== 'lobby') {
+    return (
+      <Game
+        phase={phase}
+        players={players}
+        myId={myId}
+        readyEndsAt={readyEndsAt}
+        winnerEndsAt={winnerEndsAt}
+        winnerId={winnerId}
+        detector={detector}
+        lastReaction={lastReaction}
+        onEliminate={() => send({ type: 'eliminate' })}
+        onReaction={(reaction) => send({ type: 'reaction', reaction })}
+      />
+    );
   }
 
   return (
@@ -333,11 +374,19 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
         <input
           type="checkbox"
           checked={me?.ready ?? false}
-          onChange={(e) => send({ type: 'toggleReady', ready: e.target.checked })}
+          onChange={(e) => onToggleReady(e.target.checked)}
           className="h-4 w-4 accent-go"
         />
         I'm ready
       </label>
+
+      {(detector.permissionState === 'denied' ||
+        detector.permissionState === 'unavailable') && (
+        <p className="-mt-2 text-xs text-accent">
+          Motion sensing is off, so you can't be eliminated. Open
+          joust.ninja-cactus.com on a phone for the full game.
+        </p>
+      )}
 
       <button
         type="button"
