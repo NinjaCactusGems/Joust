@@ -26,6 +26,8 @@ jobs:
       - run: npm ci
 
       - run: npm run build
+        env:
+          VITE_PARTY_HOST: ${{ vars.PARTY_HOST }}
 
       - name: Deploy to Cloudflare Pages
         id: deploy
