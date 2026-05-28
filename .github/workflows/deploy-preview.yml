@@ -1,0 +1,49 @@
+name: Deploy preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: preview-${{ github.head_ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Deploy to Cloudflare Pages
+        id: deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_KEY }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy ./dist --project-name=joust --branch=${{ github.head_ref }}
+
+      - name: Comment preview URL on PR
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: cloudflare-pages-preview
+          message: |
+            ### Cloudflare Pages preview deployed
+
+            - **URL:** ${{ steps.deploy.outputs.deployment-url }}
+            - **Commit:** ${{ github.event.pull_request.head.sha }}
+            - **Branch:** `${{ github.head_ref }}`
+
+            The preview is rebuilt on every push to this PR.

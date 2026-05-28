@@ -31,5 +31,10 @@ Notes for workflows:
 
 ## Conventions
 
-- Default branch / deploy flow: TBD once the first workflow lands.
-- Keep infrastructure-as-code (wrangler.toml, workflow files) in the repo so deploys are reproducible.
+- Default branch: `main`.
+- Deploy flow:
+  - Push to `main` → `.github/workflows/deploy-prod.yml` deploys to `joust.ninja-cactus.com`.
+  - Open / push to a PR → `.github/workflows/deploy-preview.yml` deploys a preview to `<branch>.joust.pages.dev` and posts the URL as a sticky comment.
+  - All PRs and pushes to `main` also run `.github/workflows/ci.yml` (lint, typecheck, build).
+- Keep infrastructure-as-code (wrangler.toml, workflow files) in the repo so deploys are reproducible. Cloudflare's Git integration is intentionally not used — the repo is the source of truth.
+- See `README.md` for one-time setup (Pages project pre-creation, custom domain attach, token scope check).
