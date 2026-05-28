@@ -290,9 +290,8 @@ jobs:
           echo "  - Workers subdomain: $ASSIGNED_WS.workers.dev"
           echo "  - Party worker URL:  https://$WORKER_URL"
           echo ""
-          echo "Next: set a repository variable PARTY_HOST = $WORKER_URL"
-          echo "(Settings → Secrets and variables → Actions → Variables)."
-          echo "Once set, the next deploy will inline it as VITE_PARTY_HOST."
+          echo "The deploy workflows derive this URL automatically from the"
+          echo "workers.dev subdomain — no manual repo-variable setup required."
           echo ""
           if [ -z "$CANONICAL_URL" ]; then
             echo "::warning::The production slot is empty (no canonical deployment)."

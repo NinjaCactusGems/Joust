@@ -101,11 +101,11 @@ The client defaults to `localhost:1999` when `VITE_PARTY_HOST` is unset.
 | Push to `main` | Deploys the worker (`joust-party`) **then** rebuilds and deploys the Pages site. |
 | Open / push PR | Rebuilds and deploys the Pages preview. Previews share the prod worker — no per-PR isolation. |
 
-### One-time setup after the first worker deploy
+### How the build finds the worker
 
-The worker's URL is `joust-party.<account-subdomain>.workers.dev`, where the subdomain is set per Cloudflare account. After the worker deploys for the first time, copy that hostname and set it as a **repository variable** named `PARTY_HOST` (Settings → Secrets and variables → Actions → Variables). Subsequent builds inline it via `import.meta.env.VITE_PARTY_HOST` so the deployed client knows where to connect.
+The deploy workflows query Cloudflare's API for the account's workers.dev subdomain and bake `VITE_PARTY_HOST=joust-party.<subdomain>.workers.dev` into the client at build time. There's nothing to configure manually.
 
-If `PARTY_HOST` is unset, the deployed lobby will show *Offline* (the client falls back to `localhost:1999`). The rest of the page still works.
+If you ever move the worker to a custom domain (e.g. `party.joust.ninja-cactus.com`), set a repository variable named `PARTY_HOST` to that bare hostname (Settings → Secrets and variables → Actions → Variables). When present, it overrides the auto-derived value in both prod and preview builds.
 
 ## What's not here yet
 
