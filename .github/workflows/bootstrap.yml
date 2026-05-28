@@ -96,11 +96,7 @@ jobs:
           STATUS=$(api GET "/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT")
           case "$STATUS" in
             200)
-              CURRENT_BRANCH=$(jq -r '.result.production_branch // empty' "$RESPONSE_FILE")
-              echo "Project '$PROJECT' already exists (production_branch=$CURRENT_BRANCH). Skipping creation."
-              if [ -n "$CURRENT_BRANCH" ] && [ "$CURRENT_BRANCH" != "$PRODUCTION_BRANCH" ]; then
-                echo "::warning::Existing project's production branch is '$CURRENT_BRANCH', expected '$PRODUCTION_BRANCH'. Fix in the Cloudflare dashboard if previews/prod end up swapped."
-              fi
+              echo "Project '$PROJECT' already exists. Skipping creation."
               ;;
             404)
               echo "Project does not exist. Creating..."
@@ -118,6 +114,27 @@ jobs:
               ;;
           esac
 
+          # Ensure production_branch is correct. wrangler-action auto-creates
+          # projects with production_branch="production" when --project-name
+          # points at a non-existent project, which silently lands every
+          # --branch=main deploy in a preview slot. PATCH if wrong so the
+          # next push to main goes to the production slot.
+          CURRENT_BRANCH=$(jq -r '.result.production_branch // empty' "$RESPONSE_FILE")
+          if [ "$CURRENT_BRANCH" != "$PRODUCTION_BRANCH" ]; then
+            echo "production_branch is '$CURRENT_BRANCH', expected '$PRODUCTION_BRANCH'. Updating..."
+            STATUS=$(api PATCH "/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT" \
+              "{\"production_branch\":\"$PRODUCTION_BRANCH\"}")
+            if [ "$STATUS" != "200" ] || [ "$(jq -r '.success // false' "$RESPONSE_FILE")" != "true" ]; then
+              die "Failed to update production_branch on project '$PROJECT'." "$STATUS"
+            fi
+            CURRENT_BRANCH=$PRODUCTION_BRANCH
+            PRODUCTION_BRANCH_FIXED=1
+            echo "production_branch updated to '$PRODUCTION_BRANCH'."
+          else
+            PRODUCTION_BRANCH_FIXED=0
+            echo "production_branch is correctly set to '$CURRENT_BRANCH'."
+          fi
+
           # Cloudflare reserves short/common .pages.dev names, so our
           # project's actual subdomain might be "joust-abc", not "joust".
           # Always use whatever the API tells us — never hardcode.
@@ -125,9 +142,11 @@ jobs:
           if [ -z "$PROJECT_SUBDOMAIN" ]; then
             die "Project response did not include a .subdomain field. Cannot determine the CNAME target." "$STATUS"
           fi
-          LATEST_PROD_URL=$(jq -r '.result.canonical_deployment.url // .result.latest_deployment.url // "(none)"' "$RESPONSE_FILE")
-          echo "  Project hostname    : https://$PROJECT_SUBDOMAIN"
-          echo "  Latest deployment   : $LATEST_PROD_URL"
+          CANONICAL_URL=$(jq -r '.result.canonical_deployment.url // empty' "$RESPONSE_FILE")
+          LATEST_URL=$(jq -r '.result.latest_deployment.url // empty' "$RESPONSE_FILE")
+          echo "  Project hostname     : https://$PROJECT_SUBDOMAIN"
+          echo "  Canonical deployment : ${CANONICAL_URL:-(none — production slot empty)}"
+          echo "  Latest deployment    : ${LATEST_URL:-(none)}"
           echo "::endgroup::"
 
           echo "::group::Step 2 — Custom domain ($DOMAIN)"
@@ -195,15 +214,24 @@ jobs:
 
           echo ""
           echo "Bootstrap complete."
-          echo "  - Pages project:    $PROJECT (production_branch=$PRODUCTION_BRANCH)"
+          echo "  - Pages project:    $PROJECT (production_branch=$CURRENT_BRANCH)"
           echo "  - Project hostname: https://$PROJECT_SUBDOMAIN"
           echo "  - Custom domain:    https://$DOMAIN"
           echo "  - CNAME target:     $TARGET (proxied)"
           echo ""
-          echo "If $DOMAIN does not load within a minute, the Pages production"
-          echo "slot is probably empty or the deploy went to a preview slot."
-          echo "Check 'Latest deployment' above — if it's '(none)' or a"
-          echo "preview URL, the most recent push-to-main deploy needs to"
-          echo "re-run. Otherwise check the Custom Domains tab of the"
-          echo "$PROJECT Pages project in the Cloudflare dashboard for"
-          echo "SSL/verification status."
+          if [ -z "$CANONICAL_URL" ]; then
+            echo "::warning::The production slot is empty (no canonical deployment)."
+            echo "The custom domain will return 'host_not_allowed' until a production"
+            echo "deploy lands. Trigger one with an empty commit to main, e.g.:"
+            echo "    git commit --allow-empty -m 'Trigger prod deploy' && git push origin main"
+            if [ "$PRODUCTION_BRANCH_FIXED" = "1" ]; then
+              echo "(This run also fixed production_branch — previous deploys went"
+              echo " to a preview slot, which is why prod is empty. The next push"
+              echo " to main will now land in production.)"
+            fi
+          else
+            echo "Production is live at $CANONICAL_URL → routed via $DOMAIN."
+            echo "If $DOMAIN still does not load, check the Custom Domains tab of"
+            echo "the $PROJECT Pages project for SSL/verification status (provisioning"
+            echo "can take ~1 min after a CNAME change)."
+          fi
