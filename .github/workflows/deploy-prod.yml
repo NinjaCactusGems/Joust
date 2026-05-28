@@ -23,7 +23,18 @@ jobs:
 
       - run: npm run typecheck
 
+      - run: npm run typecheck:party
+
+      - name: Deploy party worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_KEY }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy --config party/wrangler.toml
+
       - run: npm run build
+        env:
+          VITE_PARTY_HOST: ${{ vars.PARTY_HOST }}
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3

@@ -8,15 +8,21 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
+    "typecheck:party": "tsc -p party/tsconfig.json --noEmit",
     "lint": "eslint .",
+    "dev:party": "wrangler dev --config party/wrangler.toml",
     "deploy:prod": "wrangler pages deploy ./dist --project-name=joust --branch=main",
-    "deploy:preview": "wrangler pages deploy ./dist --project-name=joust"
+    "deploy:preview": "wrangler pages deploy ./dist --project-name=joust",
+    "deploy:party": "wrangler deploy --config party/wrangler.toml"
   },
   "dependencies": {
+    "partyserver": "^0.5.6",
+    "partysocket": "^1.1.19",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260528.1",
     "@eslint/js": "^9.15.0",
     "@tailwindcss/vite": "^4.0.0",
     "@types/react": "^18.3.12",

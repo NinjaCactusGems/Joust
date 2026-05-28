@@ -1,0 +1,11 @@
+name = "joust-party"
+main = "server.ts"
+compatibility_date = "2025-05-01"
+
+[[durable_objects.bindings]]
+name = "Main"
+class_name = "Main"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Main"]

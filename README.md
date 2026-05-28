@@ -76,7 +76,37 @@ The bootstrap workflow (and all deploys) needs:
 
 If any is missing, the workflow fails with a clear error in the logs naming the missing scope. Add them to the existing token rather than rotating to a Global API Key.
 
+## Multiplayer
+
+The realtime layer is a separate Cloudflare Worker in [`party/`](./party), built on [`partyserver`](https://github.com/cloudflare/partykit) + Durable Objects (the Cloudflare-native successor to PartyKit). The client connects over WebSocket via [`partysocket`](https://github.com/cloudflare/partykit/tree/main/packages/partysocket).
+
+### Local dev
+
+Run two terminals:
+
+```bash
+npm run dev:party   # worker on http://localhost:1999
+npm run dev         # Vite on http://localhost:5173
+```
+
+The client defaults to `localhost:1999` when `VITE_PARTY_HOST` is unset.
+
+### Deploy
+
+| Event | Effect |
+| --- | --- |
+| Push to `main` | Deploys the worker (`joust-party`) **then** rebuilds and deploys the Pages site. |
+| Open / push PR | Rebuilds and deploys the Pages preview. Previews share the prod worker — no per-PR isolation. |
+
+### One-time setup after the first worker deploy
+
+The worker's URL is `joust-party.<account-subdomain>.workers.dev`, where the subdomain is set per Cloudflare account. After the worker deploys for the first time, copy that hostname and set it as a **repository variable** named `PARTY_HOST` (Settings → Secrets and variables → Actions → Variables). Subsequent builds inline it via `import.meta.env.VITE_PARTY_HOST` so the deployed client knows where to connect.
+
+If `PARTY_HOST` is unset, the deployed lobby will show *Offline* (the client falls back to `localhost:1999`). The rest of the page still works.
+
 ## What's not here yet
 
-- **Multiplayer.** Originally planned as PartyKit; as of 2025 PartyKit's primitives have been folded into Cloudflare's Agents SDK / Durable Objects. Re-evaluate the realtime layer when the client is ready for it.
+- **Game logic.** The lobby shows presence (connected players) only — no turns, scoring, or chat yet.
+- **Per-PR isolated party workers.** All previews share the prod worker.
+- **Custom domain for the party worker** (e.g. `party.joust.ninja-cactus.com`). Workers.dev URL is fine for now.
 - **Per-PR custom subdomains** (e.g. `pr-123.joust.ninja-cactus.com`). Previews live on `<branch>.joust.pages.dev` instead — no wildcard DNS needed.
