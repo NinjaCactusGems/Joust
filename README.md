@@ -44,36 +44,32 @@ All Cloudflare workflows use the org-level secrets `CLOUDFLARE_ACCOUNT_ID` and `
 
 ## One-time setup
 
-These steps run **once per Cloudflare account** when bootstrapping the project.
+There's a `Bootstrap Cloudflare` workflow that does steps 1 and 2 for you using the existing org secrets:
 
-### 1. Pre-create the Pages project
+1. Open the repo's **Actions** tab → **Bootstrap Cloudflare** → **Run workflow** on `main`.
+2. It creates the `joust` Pages project (with `main` as the production branch) and attaches `joust.ninja-cactus.com` as a custom domain. Both steps are idempotent — re-running is a no-op.
+3. Once green, you can delete `.github/workflows/bootstrap.yml` or leave it in place.
 
+### What it's doing under the hood
+
+**1. Pages project** — creates a project named `joust` with `production_branch=main`. Manual equivalent:
 ```bash
-export CLOUDFLARE_API_TOKEN=<the api token from CLOUDFLARE_API_KEY>
+export CLOUDFLARE_API_TOKEN=<api token>
 export CLOUDFLARE_ACCOUNT_ID=<account id>
 npx wrangler pages project create joust --production-branch=main
 ```
+If you skip this and let the first prod deploy auto-create, the production branch defaults to `production`, not `main` — preview and prod end up swapped.
 
-If you skip this, the first prod deploy will auto-create the project but with `production` as the production branch instead of `main` — preview/prod will be the wrong way around.
-
-### 2. Attach the custom domain
-
-In the Cloudflare dashboard:
-
-1. Go to **Workers & Pages** → **joust** → **Custom domains**.
-2. Click **Set up a custom domain** and enter `joust.ninja-cactus.com`.
-3. Cloudflare auto-creates the CNAME in the `ninja-cactus.com` zone and provisions SSL. No manual DNS edit needed.
-
-`joust.ninja-cactus.com` stays a subdomain of the existing `ninja-cactus.com` zone — not a separate zone.
+**2. Custom domain** — POSTs to `/accounts/{id}/pages/projects/joust/domains` with `{"name":"joust.ninja-cactus.com"}`. Same operation as the dashboard's *Add custom domain* button. Because `ninja-cactus.com` is in the same Cloudflare account, the CNAME is auto-created in the existing zone and SSL provisions automatically. `joust.ninja-cactus.com` stays a subdomain of `ninja-cactus.com` — not a separate zone.
 
 ### 3. Verify API token scopes
 
-`wrangler pages deploy` requires:
+The bootstrap workflow (and all deploys) needs:
 
 - **Account → Cloudflare Pages → Edit**
 - **Account → Account Settings → Read**
 
-If either is missing, deploys fail with `Authentication error [code: 10000]`. Add them on the existing token rather than rotating to a Global API Key.
+If either is missing, the workflow fails with a clear error in the logs. Add them to the existing token rather than rotating to a Global API Key.
 
 ## What's not here yet
 

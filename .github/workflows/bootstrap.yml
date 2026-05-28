@@ -1,0 +1,111 @@
+name: Bootstrap Cloudflare
+
+# One-time setup workflow. Idempotent — re-running is a no-op once both
+# the Pages project and the custom domain exist. Safe to delete this file
+# after a successful run, but harmless to leave in place.
+#
+# What it does:
+#   1. Creates the `joust` Cloudflare Pages project with main as the
+#      production branch (if it doesn't already exist).
+#   2. Attaches joust.ninja-cactus.com as a custom domain on that project
+#      (if not already attached). Because ninja-cactus.com is in the same
+#      Cloudflare account, the CNAME is auto-created in the existing zone
+#      and SSL provisions automatically.
+#
+# Required API token scopes (CLOUDFLARE_API_KEY):
+#   - Account → Cloudflare Pages → Edit
+#   - Account → Account Settings → Read
+# If either is missing, the workflow will fail with a clear error.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create Pages project and attach custom domain
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_KEY }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PROJECT: joust
+          DOMAIN: joust.ninja-cactus.com
+          PRODUCTION_BRANCH: main
+        run: |
+          set -euo pipefail
+
+          api() {
+            local method=$1 path=$2 data=${3:-}
+            if [ -n "$data" ]; then
+              curl -sS -X "$method" \
+                -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+                -H "Content-Type: application/json" \
+                --data "$data" \
+                "https://api.cloudflare.com/client/v4$path"
+            else
+              curl -sS -X "$method" \
+                -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+                "https://api.cloudflare.com/client/v4$path"
+            fi
+          }
+
+          echo "::group::Verify API token"
+          TOKEN_CHECK=$(api GET /user/tokens/verify)
+          if ! echo "$TOKEN_CHECK" | grep -q '"status":"active"'; then
+            echo "API token is not active or token verification failed:"
+            echo "$TOKEN_CHECK"
+            exit 1
+          fi
+          echo "Token is active."
+          echo "::endgroup::"
+
+          echo "::group::Step 1 — Pages project ($PROJECT)"
+          PROJECT_RESP=$(api GET "/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT")
+          if echo "$PROJECT_RESP" | grep -q '"success":true'; then
+            CURRENT_BRANCH=$(echo "$PROJECT_RESP" | grep -o '"production_branch":"[^"]*"' | head -1 | cut -d'"' -f4)
+            echo "Project '$PROJECT' already exists (production_branch=$CURRENT_BRANCH). Skipping creation."
+            if [ "$CURRENT_BRANCH" != "$PRODUCTION_BRANCH" ]; then
+              echo "::warning::Existing project's production branch is '$CURRENT_BRANCH', expected '$PRODUCTION_BRANCH'. Fix in the Cloudflare dashboard if previews/prod are swapped."
+            fi
+          elif echo "$PROJECT_RESP" | grep -q '"code":8000007'; then
+            echo "Project does not exist. Creating..."
+            CREATE_RESP=$(api POST "/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects" \
+              "{\"name\":\"$PROJECT\",\"production_branch\":\"$PRODUCTION_BRANCH\"}")
+            if echo "$CREATE_RESP" | grep -q '"success":true'; then
+              echo "Created project '$PROJECT' with production_branch=$PRODUCTION_BRANCH."
+            else
+              echo "Failed to create project:"
+              echo "$CREATE_RESP"
+              exit 1
+            fi
+          else
+            echo "Unexpected response when checking project:"
+            echo "$PROJECT_RESP"
+            exit 1
+          fi
+          echo "::endgroup::"
+
+          echo "::group::Step 2 — Custom domain ($DOMAIN)"
+          DOMAINS_RESP=$(api GET "/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT/domains")
+          if echo "$DOMAINS_RESP" | grep -q "\"name\":\"$DOMAIN\""; then
+            echo "Custom domain '$DOMAIN' already attached. Skipping."
+          else
+            echo "Attaching '$DOMAIN'..."
+            ATTACH_RESP=$(api POST "/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT/domains" \
+              "{\"name\":\"$DOMAIN\"}")
+            if echo "$ATTACH_RESP" | grep -q '"success":true'; then
+              echo "Attached '$DOMAIN'. Cloudflare is provisioning SSL — typically ready within a minute."
+            else
+              echo "Failed to attach custom domain:"
+              echo "$ATTACH_RESP"
+              exit 1
+            fi
+          fi
+          echo "::endgroup::"
+
+          echo ""
+          echo "Bootstrap complete."
+          echo "  - Pages project: $PROJECT (production_branch=$PRODUCTION_BRANCH)"
+          echo "  - Custom domain: https://$DOMAIN"
+          echo ""
+          echo "Next: merge a commit to main to trigger the first production deploy."
