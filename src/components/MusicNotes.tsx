@@ -11,8 +11,8 @@ const GLYPHS = ['♪', '♫', '♩', '♬']; // ♪ ♫ ♩ ♬
 
 const MIN_SIZE = 14;
 const MAX_SIZE = 34;
-const MIN_OPACITY = 0.05;
-const MAX_OPACITY = 0.14;
+const MIN_OPACITY = 0.1;
+const MAX_OPACITY = 0.24;
 const MIN_VX = 0.15;
 const MAX_VX = 0.5;
 
@@ -20,8 +20,8 @@ const REPEL_RADIUS = 110;
 const REPEL_FORCE = 0.9;
 const EASE_BACK = 0.04;
 
-const MAX_COUNT = 32;
-const MIN_COUNT = 10;
+const MAX_COUNT = 52;
+const MIN_COUNT = 16;
 const POINTER_IDLE_MS = 1200; // notes resettle if pointer stops moving
 
 const INK_FALLBACK = '#1F1B16';
@@ -42,7 +42,7 @@ function rand(min: number, max: number): number {
 }
 
 function targetCount(width: number): number {
-  return Math.max(MIN_COUNT, Math.min(MAX_COUNT, Math.round(Math.min(width, 700) / 22)));
+  return Math.max(MIN_COUNT, Math.min(MAX_COUNT, Math.round(Math.min(width, 900) / 15)));
 }
 
 /** A note's horizontal speed scales with its size for a gentle parallax feel. */
