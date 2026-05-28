@@ -39,23 +39,46 @@ jobs:
           : > "$REPORT"
           : > "$ROWS"
 
-      - name: 1 · Repo configuration
+      - name: 0 · Resolve party host
         if: always()
         run: |
           set +e
-          DETAIL=""
-          STATUS="PASS"
-          if [ -z "${PARTY_HOST}" ]; then
-            STATUS="WARN"
-            DETAIL="PARTY_HOST repo variable is unset — client falls back to localhost:1999"
-          elif echo "${PARTY_HOST}" | grep -q '://'; then
-            STATUS="FAIL"
-            DETAIL="PARTY_HOST contains a scheme; should be a bare hostname. Got: \`${PARTY_HOST}\`"
+          SOURCE=""
+          if [ -n "${PARTY_HOST}" ]; then
+            SOURCE="repo variable override"
+          elif [ -n "${CLOUDFLARE_API_TOKEN}" ] && [ -n "${CLOUDFLARE_ACCOUNT_ID}" ]; then
+            BODY=$(mktemp)
+            curl -sS -o "$BODY" \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/subdomain"
+            SUB=$(jq -r '.result.subdomain // empty' "$BODY" 2>/dev/null)
+            if [ -n "$SUB" ]; then
+              PARTY_HOST="${WORKER_NAME}.${SUB}.workers.dev"
+              SOURCE="auto-derived from workers.dev subdomain"
+            else
+              SOURCE="unresolved — no override and no workers.dev subdomain"
+            fi
           else
-            DETAIL="\`${PARTY_HOST}\`"
+            SOURCE="unresolved — no override and no Cloudflare credentials"
           fi
-          echo "$STATUS - Repo configuration - $DETAIL"
-          printf '| %s | Repo configuration | %s |\n' "$STATUS" "$DETAIL" >> "$ROWS"
+          echo "Resolved PARTY_HOST: ${PARTY_HOST:-(none)} (${SOURCE})"
+          # Propagate to downstream steps via the job env file
+          echo "PARTY_HOST=${PARTY_HOST}" >> "$GITHUB_ENV"
+          echo "PARTY_HOST_SOURCE=${SOURCE}" >> "$GITHUB_ENV"
+
+      - name: 1 · Resolved party host
+        if: always()
+        run: |
+          set +e
+          if [ -z "${PARTY_HOST}" ]; then
+            STATUS="FAIL"; DETAIL="$PARTY_HOST_SOURCE"
+          elif echo "${PARTY_HOST}" | grep -q '://'; then
+            STATUS="FAIL"; DETAIL="contains a scheme; expected bare hostname. Got: \`${PARTY_HOST}\`"
+          else
+            STATUS="PASS"; DETAIL="\`${PARTY_HOST}\` (${PARTY_HOST_SOURCE})"
+          fi
+          echo "$STATUS - Resolved party host - $DETAIL"
+          printf '| %s | Resolved party host | %s |\n' "$STATUS" "$DETAIL" >> "$ROWS"
 
       - name: 2 · Cloudflare API token verify
         if: always()
@@ -135,11 +158,11 @@ jobs:
             else
               EXPECTED="${WORKER_NAME}.${SUB}.workers.dev"
               if [ -z "${PARTY_HOST}" ]; then
-                STATUS="WARN"; DETAIL="expected URL \`$EXPECTED\` — set repo var PARTY_HOST to this"
+                STATUS="WARN"; DETAIL="expected \`$EXPECTED\` but party host did not resolve"
               elif [ "${PARTY_HOST}" = "$EXPECTED" ]; then
                 STATUS="PASS"; DETAIL="\`$EXPECTED\`"
               else
-                STATUS="WARN"; DETAIL="PARTY_HOST (\`${PARTY_HOST}\`) ≠ expected (\`$EXPECTED\`)"
+                STATUS="WARN"; DETAIL="resolved PARTY_HOST (\`${PARTY_HOST}\`) ≠ expected (\`$EXPECTED\`)"
               fi
             fi
           fi
@@ -251,7 +274,7 @@ jobs:
               -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
               -H "Sec-WebSocket-Version: 13" \
               -H "Origin: ${PAGES_URL}" \
-              "https://${PARTY_HOST:-joust-party.invalid}/parties/main/diag-tail-${GITHUB_RUN_ID}" \
+              "https://${PARTY_HOST}/parties/main/diag-tail-${GITHUB_RUN_ID}" \
               >/dev/null 2>&1 &
             sleep 6
             kill "$TAIL_PID" 2>/dev/null
@@ -290,7 +313,7 @@ jobs:
             echo "**Environment:**"
             echo "- Pages URL: \`${PAGES_URL}\`"
             echo "- Worker: \`${WORKER_NAME}\`"
-            echo "- PARTY_HOST: \`${PARTY_HOST:-(unset)}\`"
+            echo "- PARTY_HOST: \`${PARTY_HOST:-(unresolved)}\` (${PARTY_HOST_SOURCE:-unknown})"
             echo ""
             echo "## Results"
             echo ""
