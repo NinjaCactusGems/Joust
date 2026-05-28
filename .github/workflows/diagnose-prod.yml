@@ -1,0 +1,277 @@
+name: Diagnose production
+
+# One-shot diagnostic. Designed to run from the Actions tab on a phone
+# when the lobby misbehaves and you can't open DevTools or a terminal.
+#
+# Most steps use `continue-on-error: true` so one failure doesn't hide
+# the rest of the report. Each step prints a PASS / FAIL / WARN line so
+# the result is readable from the GitHub mobile app's log view.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_KEY }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PAGES_URL: https://joust.ninja-cactus.com
+      WORKER_NAME: joust-party
+      PARTY_HOST: ${{ vars.PARTY_HOST }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: 1 · Repo configuration
+        continue-on-error: true
+        run: |
+          set +e
+          echo "PAGES_URL  = ${PAGES_URL}"
+          echo "WORKER     = ${WORKER_NAME}"
+          if [ -z "${PARTY_HOST}" ]; then
+            echo "WARN — repo variable PARTY_HOST is not set."
+            echo "       Without it, the deployed client falls back to localhost:1999"
+            echo "       and the lobby will always show Offline."
+            exit 0
+          fi
+          echo "PARTY_HOST = ${PARTY_HOST}"
+          if echo "${PARTY_HOST}" | grep -q '://'; then
+            echo "FAIL — PARTY_HOST must be a bare hostname (no scheme, no slashes)."
+            echo "       Got: ${PARTY_HOST}"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: 2 · Cloudflare API token verify
+        continue-on-error: true
+        run: |
+          set +e
+          if [ -z "${CLOUDFLARE_API_TOKEN}" ] || [ -z "${CLOUDFLARE_ACCOUNT_ID}" ]; then
+            echo "WARN — CLOUDFLARE_API_KEY / CLOUDFLARE_ACCOUNT_ID secrets missing."
+            echo "       Skipping all API-driven checks below."
+            exit 0
+          fi
+          BODY=$(mktemp)
+          STATUS=$(curl -sS -o "$BODY" -w '%{http_code}' \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            https://api.cloudflare.com/client/v4/user/tokens/verify)
+          echo "HTTP ${STATUS}"
+          jq '.result // .errors' "$BODY"
+          ACTIVE=$(jq -r '.result.status // empty' "$BODY")
+          if [ "$STATUS" = "200" ] && [ "$ACTIVE" = "active" ]; then
+            echo "PASS"
+          else
+            echo "FAIL — token verify failed."
+            exit 1
+          fi
+
+      - name: 3 · Pages site reachable
+        continue-on-error: true
+        run: |
+          set +e
+          STATUS=$(curl -sS -o /tmp/index.html -w '%{http_code}' "${PAGES_URL}/")
+          BYTES=$(wc -c < /tmp/index.html 2>/dev/null || echo 0)
+          echo "GET ${PAGES_URL}/ -> HTTP ${STATUS} (${BYTES} bytes)"
+          if [ "$STATUS" = "200" ]; then
+            echo "PASS"
+          else
+            echo "FAIL — landing page not returning 200."
+            exit 1
+          fi
+
+      - name: 4 · Bundle contains the right party host
+        continue-on-error: true
+        run: |
+          set +e
+          ASSET=$(grep -oE 'assets/index-[^"]+\.js' /tmp/index.html | head -1)
+          if [ -z "$ASSET" ]; then
+            echo "WARN — could not find a JS bundle reference in index.html."
+            exit 0
+          fi
+          echo "Bundle: ${ASSET}"
+          curl -sL "${PAGES_URL}/${ASSET}" -o /tmp/bundle.js
+          MATCHES=$(grep -oE '(joust-party[A-Za-z0-9.-]*\.workers\.dev|localhost:1999)' /tmp/bundle.js \
+            | sort -u)
+          if [ -z "$MATCHES" ]; then
+            echo "WARN — no recognised host string in the bundle."
+            echo "       The build either had no VITE_PARTY_HOST and the fallback was stripped,"
+            echo "       or the host is on an unrecognised domain. Check the build env."
+            exit 0
+          fi
+          echo "Hosts found in deployed bundle:"
+          echo "${MATCHES}" | sed 's/^/  · /'
+          if echo "${MATCHES}" | grep -q "^localhost:1999$"; then
+            echo "FAIL — bundle still references localhost:1999."
+            echo "       VITE_PARTY_HOST wasn't inlined at build time."
+            echo "       Set repo variable PARTY_HOST and re-run the prod deploy."
+            exit 1
+          fi
+          if [ -n "${PARTY_HOST}" ] && ! echo "${MATCHES}" | grep -qx "${PARTY_HOST}"; then
+            echo "FAIL — bundle host does not match repo variable PARTY_HOST=${PARTY_HOST}."
+            echo "       The most recent prod build was made against a different value."
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: 5 · Workers.dev subdomain
+        continue-on-error: true
+        run: |
+          set +e
+          [ -n "${CLOUDFLARE_API_TOKEN}" ] || { echo "skip"; exit 0; }
+          BODY=$(mktemp)
+          STATUS=$(curl -sS -o "$BODY" -w '%{http_code}' \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/subdomain")
+          echo "HTTP ${STATUS}"
+          SUB=$(jq -r '.result.subdomain // empty' "$BODY")
+          if [ -z "$SUB" ]; then
+            echo "FAIL — account has no workers.dev subdomain. Run Bootstrap Cloudflare."
+            exit 1
+          fi
+          EXPECTED="${WORKER_NAME}.${SUB}.workers.dev"
+          echo "Subdomain:        ${SUB}"
+          echo "Expected PARTY_HOST: ${EXPECTED}"
+          if [ -n "${PARTY_HOST}" ] && [ "${PARTY_HOST}" != "${EXPECTED}" ]; then
+            echo "WARN — repo variable PARTY_HOST=${PARTY_HOST} doesn't match expected ${EXPECTED}."
+            echo "       Update the repo variable if the worker really lives at the expected URL."
+            exit 0
+          fi
+          echo "PASS"
+
+      - name: 6 · Worker exists
+        continue-on-error: true
+        run: |
+          set +e
+          [ -n "${CLOUDFLARE_API_TOKEN}" ] || { echo "skip"; exit 0; }
+          BODY=$(mktemp)
+          STATUS=$(curl -sS -o "$BODY" -w '%{http_code}' \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H "Accept: application/json" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/services/${WORKER_NAME}")
+          echo "HTTP ${STATUS}"
+          if [ "$STATUS" = "200" ]; then
+            jq '{id: .result.id, created_on: .result.created_on, default_environment: .result.default_environment.script.modified_on}' "$BODY" 2>/dev/null \
+              || jq '.result' "$BODY"
+            echo "PASS"
+          elif [ "$STATUS" = "404" ]; then
+            echo "FAIL — worker '${WORKER_NAME}' not found in this account."
+            exit 1
+          else
+            jq '.errors // .' "$BODY"
+            echo "FAIL — unexpected status."
+            exit 1
+          fi
+
+      - name: 7 · Latest Pages deployment
+        continue-on-error: true
+        run: |
+          set +e
+          [ -n "${CLOUDFLARE_API_TOKEN}" ] || { echo "skip"; exit 0; }
+          BODY=$(mktemp)
+          STATUS=$(curl -sS -o "$BODY" -w '%{http_code}' \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/joust/deployments?per_page=1")
+          echo "HTTP ${STATUS}"
+          jq '.result[0] | {id, environment, created_on, url, latest_stage: .latest_stage.status}' "$BODY" 2>/dev/null \
+            || cat "$BODY"
+
+      - name: 8 · WebSocket upgrade — allowed Origin
+        continue-on-error: true
+        run: |
+          set +e
+          if [ -z "${PARTY_HOST}" ]; then
+            echo "skip — PARTY_HOST not set"; exit 0
+          fi
+          ROOM="diag-${GITHUB_RUN_ID}"
+          OUT=$(curl -sS --http1.1 --include --max-time 4 \
+            -H "Connection: Upgrade" \
+            -H "Upgrade: websocket" \
+            -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
+            -H "Sec-WebSocket-Version: 13" \
+            -H "Origin: ${PAGES_URL}" \
+            "https://${PARTY_HOST}/parties/main/${ROOM}" 2>&1)
+          echo "$OUT" | head -15
+          STATUS=$(printf '%s\n' "$OUT" | grep -m1 -oE 'HTTP/1\.1 [0-9]+' | awk '{print $2}')
+          echo ""
+          echo "Parsed status: ${STATUS:-(none)}"
+          case "$STATUS" in
+            101)
+              echo "PASS — worker accepted the upgrade from ${PAGES_URL}." ;;
+            403)
+              echo "FAIL — worker returned 403. Origin allowlist may not include ${PAGES_URL}." ; exit 1 ;;
+            404)
+              echo "FAIL — 404. Wrong path or wrong worker, check PARTY_HOST." ; exit 1 ;;
+            "")
+              echo "FAIL — no response (DNS/TLS issue or worker offline)." ; exit 1 ;;
+            *)
+              echo "FAIL — unexpected HTTP ${STATUS}." ; exit 1 ;;
+          esac
+
+      - name: 9 · WebSocket upgrade — disallowed Origin
+        continue-on-error: true
+        run: |
+          set +e
+          if [ -z "${PARTY_HOST}" ]; then
+            echo "skip — PARTY_HOST not set"; exit 0
+          fi
+          OUT=$(curl -sS --http1.1 --include --max-time 4 \
+            -H "Connection: Upgrade" \
+            -H "Upgrade: websocket" \
+            -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
+            -H "Sec-WebSocket-Version: 13" \
+            -H "Origin: https://example.com" \
+            "https://${PARTY_HOST}/parties/main/diag-${GITHUB_RUN_ID}" 2>&1)
+          echo "$OUT" | head -10
+          STATUS=$(printf '%s\n' "$OUT" | grep -m1 -oE 'HTTP/1\.1 [0-9]+' | awk '{print $2}')
+          echo ""
+          echo "Parsed status: ${STATUS:-(none)}"
+          if [ "$STATUS" = "403" ]; then
+            echo "PASS — worker correctly rejected foreign Origin with 403."
+          else
+            echo "FAIL — expected 403 for example.com Origin, got ${STATUS:-(none)}."
+            echo "       The Origin allowlist may be missing or too broad."
+            exit 1
+          fi
+
+      - name: 10 · Live worker logs (~12s window)
+        continue-on-error: true
+        run: |
+          set +e
+          [ -n "${CLOUDFLARE_API_TOKEN}" ] || { echo "skip"; exit 0; }
+          # Stream logs to a file in the background, then poke the worker
+          # while the stream is live so the log lines for our own requests
+          # land in the captured window.
+          (npx --yes wrangler@3 tail "${WORKER_NAME}" --format pretty > /tmp/tail.log 2>&1) &
+          TAIL_PID=$!
+          sleep 3
+          echo "Triggering a real WS upgrade for the tail to capture..."
+          curl -sS --http1.1 --include --max-time 3 \
+            -H "Connection: Upgrade" \
+            -H "Upgrade: websocket" \
+            -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
+            -H "Sec-WebSocket-Version: 13" \
+            -H "Origin: ${PAGES_URL}" \
+            "https://${PARTY_HOST}/parties/main/diag-tail-${GITHUB_RUN_ID}" >/dev/null 2>&1 &
+          sleep 6
+          kill "$TAIL_PID" 2>/dev/null
+          wait "$TAIL_PID" 2>/dev/null
+          echo ""
+          echo "--- captured tail output ---"
+          if [ -s /tmp/tail.log ]; then
+            sed -n '1,200p' /tmp/tail.log
+          else
+            echo "(empty)"
+          fi
+          echo "--- end tail output ---"
+
+      - name: Done
+        if: always()
+        run: |
+          echo "Diagnostic complete. Scroll up — each step's PASS/FAIL line tells you what's broken."
