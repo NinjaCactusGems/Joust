@@ -60,7 +60,11 @@ npx wrangler pages project create joust --production-branch=main
 ```
 If you skip this and let the first prod deploy auto-create, the production branch defaults to `production`, not `main` — preview and prod end up swapped.
 
-**2. Custom domain** — POSTs to `/accounts/{id}/pages/projects/joust/domains` with `{"name":"joust.ninja-cactus.com"}`. Same operation as the dashboard's *Add custom domain* button. Because `ninja-cactus.com` is in the same Cloudflare account, the CNAME is auto-created in the existing zone and SSL provisions automatically. `joust.ninja-cactus.com` stays a subdomain of `ninja-cactus.com` — not a separate zone.
+**2. Custom domain** — POSTs to `/accounts/{id}/pages/projects/joust/domains` with `{"name":"joust.ninja-cactus.com"}`. Registers the domain with the Pages project and triggers SSL provisioning.
+
+**3. CNAME record** — POSTs to `/zones/{zone_id}/dns_records` to create `joust.ninja-cactus.com` → `joust.pages.dev` (proxied) in the `ninja-cactus.com` zone. Only the Cloudflare dashboard's *Add custom domain* button auto-creates DNS; the API in step 2 does not, so this step is required.
+
+`joust.ninja-cactus.com` stays a subdomain of the existing `ninja-cactus.com` zone — not a separate zone.
 
 ### 3. Verify API token scopes
 
@@ -68,8 +72,9 @@ The bootstrap workflow (and all deploys) needs:
 
 - **Account → Cloudflare Pages → Edit**
 - **Account → Account Settings → Read**
+- **Zone → DNS → Edit** (for `ninja-cactus.com`)
 
-If either is missing, the workflow fails with a clear error in the logs. Add them to the existing token rather than rotating to a Global API Key.
+If any is missing, the workflow fails with a clear error in the logs naming the missing scope. Add them to the existing token rather than rotating to a Global API Key.
 
 ## What's not here yet
 

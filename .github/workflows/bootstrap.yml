@@ -8,14 +8,17 @@ name: Bootstrap Cloudflare
 #   1. Creates the `joust` Cloudflare Pages project with main as the
 #      production branch (if it doesn't already exist).
 #   2. Attaches joust.ninja-cactus.com as a custom domain on that project
-#      (if not already attached). Because ninja-cactus.com is in the same
-#      Cloudflare account, the CNAME is auto-created in the existing zone
-#      and SSL provisions automatically.
+#      (if not already attached).
+#   3. Creates the CNAME record joust.ninja-cactus.com -> joust.pages.dev
+#      in the ninja-cactus.com zone. This step is required: only the
+#      Cloudflare dashboard's add-domain flow creates DNS automatically;
+#      the API endpoint used in step 2 does not.
 #
 # Required API token scopes (CLOUDFLARE_API_KEY):
 #   - Account → Cloudflare Pages → Edit
 #   - Account → Account Settings → Read
-# If either is missing, the workflow will fail with a clear error.
+#   - Zone → DNS → Edit (for ninja-cactus.com)
+# If any is missing, the workflow will fail with a clear error.
 
 on:
   workflow_dispatch:
@@ -129,13 +132,53 @@ jobs:
             if [ "$STATUS" != "200" ] || [ "$(jq -r '.success // false' "$RESPONSE_FILE")" != "true" ]; then
               die "Failed to attach custom domain '$DOMAIN' to project '$PROJECT'." "$STATUS"
             fi
-            echo "Attached '$DOMAIN'. Cloudflare is provisioning SSL — typically ready within a minute."
+            echo "Attached '$DOMAIN' to Pages project. DNS still needed (next step)."
+          fi
+          echo "::endgroup::"
+
+          echo "::group::Step 3 — DNS record ($DOMAIN -> $PROJECT.pages.dev)"
+          # Derive the zone name from the domain. $DOMAIN is a single
+          # subdomain of the zone (joust.ninja-cactus.com -> ninja-cactus.com).
+          ZONE_NAME=${DOMAIN#*.}
+          TARGET="$PROJECT.pages.dev"
+
+          STATUS=$(api GET "/zones?name=$ZONE_NAME")
+          if [ "$STATUS" != "200" ]; then
+            die "Failed to list zones." "$STATUS"
+          fi
+          ZONE_ID=$(jq -r '.result[0].id // empty' "$RESPONSE_FILE")
+          if [ -z "$ZONE_ID" ]; then
+            die "Zone '$ZONE_NAME' not found in this Cloudflare account, or the token lacks 'Zone:Read' for it." "$STATUS"
+          fi
+          echo "Found zone '$ZONE_NAME' (id=$ZONE_ID)."
+
+          STATUS=$(api GET "/zones/$ZONE_ID/dns_records?type=CNAME&name=$DOMAIN")
+          if [ "$STATUS" != "200" ]; then
+            die "Failed to list DNS records for zone '$ZONE_NAME'." "$STATUS"
+          fi
+          EXISTING_CONTENT=$(jq -r '.result[0].content // empty' "$RESPONSE_FILE")
+          if [ -n "$EXISTING_CONTENT" ]; then
+            echo "CNAME already exists: $DOMAIN -> $EXISTING_CONTENT. Skipping."
+            if [ "$EXISTING_CONTENT" != "$TARGET" ]; then
+              echo "::warning::Existing CNAME points to '$EXISTING_CONTENT', expected '$TARGET'. Fix manually if the domain doesn't resolve."
+            fi
+          else
+            echo "Creating CNAME: $DOMAIN -> $TARGET (proxied through Cloudflare)..."
+            STATUS=$(api POST "/zones/$ZONE_ID/dns_records" \
+              "{\"type\":\"CNAME\",\"name\":\"$DOMAIN\",\"content\":\"$TARGET\",\"proxied\":true}")
+            if [ "$STATUS" != "200" ] || [ "$(jq -r '.success // false' "$RESPONSE_FILE")" != "true" ]; then
+              die "Failed to create CNAME record. The token likely lacks 'Zone:DNS:Edit' for $ZONE_NAME." "$STATUS"
+            fi
+            echo "CNAME created. DNS propagates within seconds; SSL provisioning completes in ~1 minute."
           fi
           echo "::endgroup::"
 
           echo ""
           echo "Bootstrap complete."
-          echo "  - Pages project: $PROJECT (production_branch=$PRODUCTION_BRANCH)"
-          echo "  - Custom domain: https://$DOMAIN"
+          echo "  - Pages project:  $PROJECT (production_branch=$PRODUCTION_BRANCH)"
+          echo "  - Custom domain:  https://$DOMAIN"
+          echo "  - CNAME target:   $TARGET"
           echo ""
-          echo "Next: merge a commit to main to trigger the first production deploy."
+          echo "If $DOMAIN does not load within a minute, check the Custom Domains"
+          echo "tab of the $PROJECT Pages project in the Cloudflare dashboard for"
+          echo "SSL/verification status."
