@@ -32,74 +32,104 @@ jobs:
           DOMAIN: joust.ninja-cactus.com
           PRODUCTION_BRANCH: main
         run: |
-          set -euo pipefail
+          set -eo pipefail
 
+          # Sanity-check that the org secrets reached this workflow.
+          # An empty value here usually means the repo isn't included in
+          # the organisation secret's repository access list.
+          if [ -z "${CLOUDFLARE_API_TOKEN}" ]; then
+            echo "::error::CLOUDFLARE_API_KEY secret is empty in this workflow. Check the org secret's repository access policy and confirm this repo is allowed."
+            exit 1
+          fi
+          if [ -z "${CLOUDFLARE_ACCOUNT_ID}" ]; then
+            echo "::error::CLOUDFLARE_ACCOUNT_ID secret is empty in this workflow. Check the org secret's repository access policy and confirm this repo is allowed."
+            exit 1
+          fi
+
+          # api METHOD PATH [JSON_BODY]
+          # Writes the response body to stdout. Returns the HTTP status
+          # code via the API_STATUS global. Never short-circuits on HTTP
+          # errors — callers decide what to do with non-2xx.
+          API_STATUS=0
           api() {
             local method=$1 path=$2 data=${3:-}
+            local tmp
+            tmp=$(mktemp)
             if [ -n "$data" ]; then
-              curl -sS -X "$method" \
-                -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              API_STATUS=$(curl -sS -o "$tmp" -w '%{http_code}' \
+                -X "$method" \
+                -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
                 -H "Content-Type: application/json" \
                 --data "$data" \
-                "https://api.cloudflare.com/client/v4$path"
+                "https://api.cloudflare.com/client/v4$path")
             else
-              curl -sS -X "$method" \
-                -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-                "https://api.cloudflare.com/client/v4$path"
+              API_STATUS=$(curl -sS -o "$tmp" -w '%{http_code}' \
+                -X "$method" \
+                -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                "https://api.cloudflare.com/client/v4$path")
             fi
+            cat "$tmp"
+            rm -f "$tmp"
+          }
+
+          die() {
+            local context=$1 body=$2
+            echo "::error::$context (HTTP $API_STATUS)"
+            echo "--- Cloudflare response ---"
+            echo "$body" | jq . 2>/dev/null || echo "$body"
+            echo "---------------------------"
+            exit 1
           }
 
           echo "::group::Verify API token"
-          TOKEN_CHECK=$(api GET /user/tokens/verify)
-          if ! echo "$TOKEN_CHECK" | grep -q '"status":"active"'; then
-            echo "API token is not active or token verification failed:"
-            echo "$TOKEN_CHECK"
-            exit 1
+          BODY=$(api GET /user/tokens/verify)
+          if [ "$API_STATUS" != "200" ] || [ "$(echo "$BODY" | jq -r '.result.status // empty')" != "active" ]; then
+            die "API token verification failed — token is missing, invalid, or lacks the minimum scopes." "$BODY"
           fi
           echo "Token is active."
           echo "::endgroup::"
 
           echo "::group::Step 1 — Pages project ($PROJECT)"
-          PROJECT_RESP=$(api GET "/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT")
-          if echo "$PROJECT_RESP" | grep -q '"success":true'; then
-            CURRENT_BRANCH=$(echo "$PROJECT_RESP" | grep -o '"production_branch":"[^"]*"' | head -1 | cut -d'"' -f4)
-            echo "Project '$PROJECT' already exists (production_branch=$CURRENT_BRANCH). Skipping creation."
-            if [ "$CURRENT_BRANCH" != "$PRODUCTION_BRANCH" ]; then
-              echo "::warning::Existing project's production branch is '$CURRENT_BRANCH', expected '$PRODUCTION_BRANCH'. Fix in the Cloudflare dashboard if previews/prod are swapped."
-            fi
-          elif echo "$PROJECT_RESP" | grep -q '"code":8000007'; then
-            echo "Project does not exist. Creating..."
-            CREATE_RESP=$(api POST "/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects" \
-              "{\"name\":\"$PROJECT\",\"production_branch\":\"$PRODUCTION_BRANCH\"}")
-            if echo "$CREATE_RESP" | grep -q '"success":true'; then
+          BODY=$(api GET "/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT")
+          case "$API_STATUS" in
+            200)
+              CURRENT_BRANCH=$(echo "$BODY" | jq -r '.result.production_branch // empty')
+              echo "Project '$PROJECT' already exists (production_branch=$CURRENT_BRANCH). Skipping creation."
+              if [ -n "$CURRENT_BRANCH" ] && [ "$CURRENT_BRANCH" != "$PRODUCTION_BRANCH" ]; then
+                echo "::warning::Existing project's production branch is '$CURRENT_BRANCH', expected '$PRODUCTION_BRANCH'. Fix in the Cloudflare dashboard if previews/prod end up swapped."
+              fi
+              ;;
+            404)
+              echo "Project does not exist. Creating..."
+              BODY=$(api POST "/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects" \
+                "{\"name\":\"$PROJECT\",\"production_branch\":\"$PRODUCTION_BRANCH\"}")
+              if [ "$API_STATUS" != "200" ] || [ "$(echo "$BODY" | jq -r '.success // false')" != "true" ]; then
+                die "Failed to create Pages project '$PROJECT'. The token likely lacks the 'Cloudflare Pages: Edit' scope." "$BODY"
+              fi
               echo "Created project '$PROJECT' with production_branch=$PRODUCTION_BRANCH."
-            else
-              echo "Failed to create project:"
-              echo "$CREATE_RESP"
-              exit 1
-            fi
-          else
-            echo "Unexpected response when checking project:"
-            echo "$PROJECT_RESP"
-            exit 1
-          fi
+              ;;
+            *)
+              die "Unexpected status when checking project '$PROJECT'." "$BODY"
+              ;;
+          esac
           echo "::endgroup::"
 
           echo "::group::Step 2 — Custom domain ($DOMAIN)"
-          DOMAINS_RESP=$(api GET "/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT/domains")
-          if echo "$DOMAINS_RESP" | grep -q "\"name\":\"$DOMAIN\""; then
+          BODY=$(api GET "/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT/domains")
+          if [ "$API_STATUS" != "200" ]; then
+            die "Failed to list domains for project '$PROJECT'." "$BODY"
+          fi
+
+          if echo "$BODY" | jq -e --arg d "$DOMAIN" '.result[] | select(.name == $d)' >/dev/null; then
             echo "Custom domain '$DOMAIN' already attached. Skipping."
           else
             echo "Attaching '$DOMAIN'..."
-            ATTACH_RESP=$(api POST "/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT/domains" \
+            BODY=$(api POST "/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT/domains" \
               "{\"name\":\"$DOMAIN\"}")
-            if echo "$ATTACH_RESP" | grep -q '"success":true'; then
-              echo "Attached '$DOMAIN'. Cloudflare is provisioning SSL — typically ready within a minute."
-            else
-              echo "Failed to attach custom domain:"
-              echo "$ATTACH_RESP"
-              exit 1
+            if [ "$API_STATUS" != "200" ] || [ "$(echo "$BODY" | jq -r '.success // false')" != "true" ]; then
+              die "Failed to attach custom domain '$DOMAIN' to project '$PROJECT'." "$BODY"
             fi
+            echo "Attached '$DOMAIN'. Cloudflare is provisioning SSL — typically ready within a minute."
           fi
           echo "::endgroup::"
 
