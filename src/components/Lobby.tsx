@@ -8,13 +8,18 @@ import { useShakeDetector } from '../hooks/useShakeDetector';
 
 const PARTY_HOST = import.meta.env.VITE_PARTY_HOST || 'localhost:1999';
 
-const PLAYER_ID_KEY = 'joust:playerId';
 const PLAYER_NAME_KEY = 'joust:playerName';
 
 // Jousting watches motion at the Normal/medium threshold (7 m/s², per CLAUDE.md).
 const JOUST_THRESHOLD = 7;
 
-type Player = { id: string; name: string; ready: boolean; eliminated: boolean };
+type Player = {
+  id: string;
+  name: string;
+  ready: boolean;
+  eliminated: boolean;
+  away: boolean;
+};
 
 type LobbyState =
   | { phase: 'idle' }
@@ -26,18 +31,6 @@ function readRoomFromUrl(): string | null {
   if (!code) return null;
   const normalized = normalizeRoomCode(code);
   return normalized.length >= 3 ? normalized : null;
-}
-
-// Stable identity so the server can tell connections apart and the client can
-// recognise its own entity. Persisted so a reload keeps the same name.
-function getPlayerId(): string {
-  if (typeof window === 'undefined') return 'anon';
-  let id = window.localStorage.getItem(PLAYER_ID_KEY);
-  if (!id) {
-    id = crypto.randomUUID();
-    window.localStorage.setItem(PLAYER_ID_KEY, id);
-  }
-  return id;
 }
 
 function getPlayerName(): string {
@@ -130,7 +123,11 @@ function IdleLobby({ onEnter }: { onEnter: (code: string) => void }) {
 }
 
 function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
-  const myId = useMemo(() => getPlayerId(), []);
+  // Per-mount connection id: each tab/Room mount gets its own. Sharing one id
+  // across browser tabs (e.g. via localStorage) collides at the partyserver
+  // layer — the second WS with the same id evicts the first, so only one
+  // tab can stay connected at a time.
+  const myId = useMemo(() => crypto.randomUUID(), []);
   const myName = useRef(getPlayerName());
 
   const [players, setPlayers] = useState<Player[]>([]);
@@ -198,12 +195,30 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
     }
   }, [status, socket]);
 
+  // Broadcast tab visibility so the server can ignore backgrounded players
+  // for the "all ready" gate — otherwise a forgotten tab in the room holds
+  // everyone else hostage waiting for it to ready up.
+  useEffect(() => {
+    if (status !== 'open') return;
+    const send = (visible: boolean) => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'visibility', visible }));
+      }
+    };
+    send(!document.hidden);
+    const onChange = () => send(!document.hidden);
+    document.addEventListener('visibilitychange', onChange);
+    return () => document.removeEventListener('visibilitychange', onChange);
+  }, [status, socket]);
+
   const send = (msg: unknown) => {
     if (status === 'open') socket.send(JSON.stringify(msg));
   };
 
   const me = players.find((p) => p.id === myId);
-  const allReady = players.length > 0 && players.every((p) => p.ready);
+  // Backgrounded tabs are skipped — they neither block start nor count.
+  const activePlayers = players.filter((p) => !p.away);
+  const allReady = activePlayers.length > 0 && activePlayers.every((p) => p.ready);
 
   const shareUrl =
     typeof window !== 'undefined'
@@ -310,13 +325,13 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
                     isMe
                       ? 'bg-go/10 ring-1 ring-go/40'
                       : 'bg-paper'
-                  }`}
+                  } ${p.away ? 'opacity-50' : ''}`}
                 >
                   <span
                     className={`h-2 w-2 shrink-0 rounded-full ${
-                      p.ready ? 'bg-go' : 'bg-ink-faint'
+                      p.away ? 'bg-ink-faint' : p.ready ? 'bg-go' : 'bg-ink-faint'
                     }`}
-                    title={p.ready ? 'Ready' : 'Not ready'}
+                    title={p.away ? 'Away' : p.ready ? 'Ready' : 'Not ready'}
                   />
                   {isMe && editing ? (
                     <form
@@ -347,6 +362,11 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
                       <span className="flex-1 truncate text-ink">
                         {p.name}
                       </span>
+                      {p.away && (
+                        <span className="shrink-0 rounded-full bg-line px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-ink-muted">
+                          Away
+                        </span>
+                      )}
                       {isMe && (
                         <>
                           <span className="shrink-0 rounded-full bg-go/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-go">

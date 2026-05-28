@@ -4,7 +4,13 @@ type Phase = 'lobby' | 'ready' | 'jousting' | 'winner';
 
 type Reaction = 'turd' | 'heart' | 'dancer';
 
-type Player = { id: string; name: string; ready: boolean; eliminated: boolean };
+type Player = {
+  id: string;
+  name: string;
+  ready: boolean;
+  eliminated: boolean;
+  away: boolean;
+};
 
 type RoomState = {
   type: 'state';
@@ -27,6 +33,7 @@ type ReactionEvent = {
 type ClientMessage =
   | { type: 'setName'; name: string }
   | { type: 'toggleReady'; ready: boolean }
+  | { type: 'visibility'; visible: boolean }
   | { type: 'start' }
   | { type: 'eliminate' }
   | { type: 'reaction'; reaction: Reaction };
@@ -76,7 +83,7 @@ export class Main extends Server {
   // Per-connection state, keyed by connection id.
   private playerState = new Map<
     string,
-    { name: string; ready: boolean; eliminated: boolean }
+    { name: string; ready: boolean; eliminated: boolean; visible: boolean }
   >();
 
   onConnect(connection: Connection) {
@@ -119,6 +126,27 @@ export class Main extends Server {
         this.broadcastState();
         break;
       }
+      case 'visibility': {
+        const entry = this.ensurePlayer(connection.id);
+        const wasVisible = entry.visible;
+        entry.visible = Boolean(msg.visible);
+        if (!entry.visible) {
+          // Backgrounded players can't drive the lobby — clear ready so a
+          // forgotten tab can't keep the room "ready" by accident.
+          entry.ready = false;
+          // Mid-round, auto-eliminate so the away player doesn't haunt the
+          // jousting phase forever. resetToLobby() clears this for next round.
+          if (this.phase === 'ready' || this.phase === 'jousting') {
+            entry.eliminated = true;
+          }
+        }
+        this.broadcastState();
+        // A forced elimination can drop the room to one survivor.
+        if (!entry.visible && wasVisible && this.phase === 'jousting') {
+          this.checkWinCondition();
+        }
+        break;
+      }
       case 'start': {
         this.tryStartGame();
         break;
@@ -154,10 +182,11 @@ export class Main extends Server {
     name: string;
     ready: boolean;
     eliminated: boolean;
+    visible: boolean;
   } {
     let entry = this.playerState.get(id);
     if (!entry) {
-      entry = { name: 'Player', ready: false, eliminated: false };
+      entry = { name: 'Player', ready: false, eliminated: false, visible: true };
       this.playerState.set(id, entry);
     }
     return entry;
@@ -171,6 +200,7 @@ export class Main extends Server {
         name: entry.name,
         ready: entry.ready,
         eliminated: entry.eliminated,
+        away: !entry.visible,
       };
     });
   }
@@ -184,11 +214,16 @@ export class Main extends Server {
 
   private tryStartGame() {
     if (this.phase !== 'lobby') return;
-    const players = this.currentPlayers();
-    if (players.length === 0 || !players.every((p) => p.ready)) return;
+    // Skip away players entirely — they neither block start nor count
+    // toward the "all ready" check. They stay in the room and rejoin
+    // the next lobby cycle when they come back.
+    const active = this.currentPlayers().filter((p) => !p.away);
+    if (active.length === 0 || !active.every((p) => p.ready)) return;
 
     for (const entry of this.playerState.values()) {
-      entry.eliminated = false;
+      // Away players start the round already eliminated — they don't get
+      // to spectate-then-win by tapping back in halfway through.
+      entry.eliminated = !entry.visible;
     }
     this.winnerId = null;
     this.phase = 'ready';

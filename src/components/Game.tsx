@@ -10,6 +10,7 @@ export type Player = {
   name: string;
   ready: boolean;
   eliminated: boolean;
+  away: boolean;
 };
 
 const REACTION_EMOJI: Record<Reaction, string> = {
