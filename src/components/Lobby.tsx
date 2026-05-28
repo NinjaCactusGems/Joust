@@ -1,8 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import usePartySocket from 'partysocket/react';
+import { QRCodeSVG } from 'qrcode.react';
 import { generateRoomCode, normalizeRoomCode } from '../lib/roomCode';
+import { generateRandomName } from '../lib/names';
+import { Match } from './Match';
 
 const PARTY_HOST = import.meta.env.VITE_PARTY_HOST || 'localhost:1999';
+
+const PLAYER_ID_KEY = 'joust:playerId';
+const PLAYER_NAME_KEY = 'joust:playerName';
+
+type Player = { id: string; name: string; ready: boolean };
 
 type LobbyState =
   | { phase: 'idle' }
@@ -14,6 +22,28 @@ function readRoomFromUrl(): string | null {
   if (!code) return null;
   const normalized = normalizeRoomCode(code);
   return normalized.length >= 3 ? normalized : null;
+}
+
+// Stable identity so the server can tell connections apart and the client can
+// recognise its own entity. Persisted so a reload keeps the same name.
+function getPlayerId(): string {
+  if (typeof window === 'undefined') return 'anon';
+  let id = window.localStorage.getItem(PLAYER_ID_KEY);
+  if (!id) {
+    id = crypto.randomUUID();
+    window.localStorage.setItem(PLAYER_ID_KEY, id);
+  }
+  return id;
+}
+
+function getPlayerName(): string {
+  if (typeof window === 'undefined') return 'Player';
+  let name = window.localStorage.getItem(PLAYER_NAME_KEY);
+  if (!name) {
+    name = generateRandomName();
+    window.localStorage.setItem(PLAYER_NAME_KEY, name);
+  }
+  return name;
 }
 
 export function Lobby() {
@@ -96,16 +126,24 @@ function IdleLobby({ onEnter }: { onEnter: (code: string) => void }) {
 }
 
 function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
-  const [players, setPlayers] = useState<string[]>([]);
+  const myId = useMemo(() => getPlayerId(), []);
+  const myName = useRef(getPlayerName());
+
+  const [players, setPlayers] = useState<Player[]>([]);
+  const [phase, setPhase] = useState<'lobby' | 'match'>('lobby');
+  const [matchEndsAt, setMatchEndsAt] = useState<number | null>(null);
   const [status, setStatus] = useState<'connecting' | 'open' | 'closed'>(
     'connecting',
   );
   const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draftName, setDraftName] = useState('');
 
-  usePartySocket({
+  const socket = usePartySocket({
     host: PARTY_HOST,
     party: 'main',
     room: code,
+    id: myId,
     onOpen() {
       setStatus('open');
     },
@@ -114,15 +152,36 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
     },
     onMessage(event: MessageEvent) {
       try {
-        const data = JSON.parse(event.data) as { type?: string; players?: string[] };
-        if (data.type === 'presence' && Array.isArray(data.players)) {
-          setPlayers(data.players);
+        const data = JSON.parse(event.data) as Partial<{
+          type: string;
+          phase: 'lobby' | 'match';
+          matchEndsAt: number | null;
+          players: Player[];
+        }>;
+        if (data.type === 'state') {
+          setPhase(data.phase === 'match' ? 'match' : 'lobby');
+          setMatchEndsAt(data.matchEndsAt ?? null);
+          setPlayers(Array.isArray(data.players) ? data.players : []);
         }
       } catch {
         // ignore non-JSON frames
       }
     },
   });
+
+  // Announce our name once connected.
+  useEffect(() => {
+    if (status === 'open') {
+      socket.send(JSON.stringify({ type: 'setName', name: myName.current }));
+    }
+  }, [status, socket]);
+
+  const send = (msg: unknown) => {
+    if (status === 'open') socket.send(JSON.stringify(msg));
+  };
+
+  const me = players.find((p) => p.id === myId);
+  const allReady = players.length > 0 && players.every((p) => p.ready);
 
   const shareUrl =
     typeof window !== 'undefined'
@@ -144,6 +203,27 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
     }
   };
 
+  const startEditing = () => {
+    setDraftName(me?.name ?? myName.current);
+    setEditing(true);
+  };
+
+  const saveName = () => {
+    const name = draftName.trim().slice(0, 24);
+    if (name) {
+      myName.current = name;
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(PLAYER_NAME_KEY, name);
+      }
+      send({ type: 'setName', name });
+    }
+    setEditing(false);
+  };
+
+  if (phase === 'match' && matchEndsAt) {
+    return <Match endsAt={matchEndsAt} />;
+  }
+
   return (
     <div className="w-full max-w-sm rounded-2xl border border-line bg-paper-raised/80 p-5 flex flex-col gap-4">
       <div className="flex items-baseline justify-between">
@@ -157,13 +237,18 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
         {code}
       </div>
 
-      <button
-        type="button"
-        onClick={copy}
-        className="w-full rounded-full border border-line bg-paper px-4 py-2 text-sm font-medium text-ink active:scale-95 transition"
-      >
-        {copied ? 'Link copied' : 'Copy share link'}
-      </button>
+      <div className="flex flex-col items-center gap-3">
+        <div className="rounded-xl bg-paper-raised p-3">
+          <QRCodeSVG value={shareUrl} size={140} bgColor="#FBF8F1" fgColor="#1F1B16" />
+        </div>
+        <button
+          type="button"
+          onClick={copy}
+          className="w-full rounded-full border border-line bg-paper px-4 py-2 text-sm font-medium text-ink active:scale-95 transition"
+        >
+          {copied ? 'Link copied' : 'Copy share link'}
+        </button>
+      </div>
 
       <div className="flex flex-col gap-2">
         <div className="text-xs uppercase tracking-wider text-ink-muted">
@@ -174,19 +259,94 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
             Waiting for connection…
           </div>
         ) : (
-          <ul className="flex flex-col gap-1">
-            {players.map((p) => (
-              <li
-                key={p}
-                className="font-mono text-sm text-ink truncate"
-                title={p}
-              >
-                {p}
-              </li>
-            ))}
+          <ul className="flex flex-col gap-1.5">
+            {players.map((p) => {
+              const isMe = p.id === myId;
+              return (
+                <li
+                  key={p.id}
+                  className={`flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm ${
+                    isMe
+                      ? 'bg-go/10 ring-1 ring-go/40'
+                      : 'bg-paper'
+                  }`}
+                >
+                  <span
+                    className={`h-2 w-2 shrink-0 rounded-full ${
+                      p.ready ? 'bg-go' : 'bg-ink-faint'
+                    }`}
+                    title={p.ready ? 'Ready' : 'Not ready'}
+                  />
+                  {isMe && editing ? (
+                    <form
+                      className="flex flex-1 items-center gap-2"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        saveName();
+                      }}
+                    >
+                      <input
+                        type="text"
+                        autoFocus
+                        value={draftName}
+                        maxLength={24}
+                        onChange={(e) => setDraftName(e.target.value)}
+                        onBlur={saveName}
+                        className="min-w-0 flex-1 rounded-md border border-line bg-paper px-2 py-1 text-sm text-ink focus:outline-none focus:border-go"
+                      />
+                      <button
+                        type="submit"
+                        className="shrink-0 rounded-md bg-go px-2 py-1 text-xs font-semibold text-paper"
+                      >
+                        Save
+                      </button>
+                    </form>
+                  ) : (
+                    <>
+                      <span className="flex-1 truncate text-ink">
+                        {p.name}
+                      </span>
+                      {isMe && (
+                        <>
+                          <span className="shrink-0 rounded-full bg-go/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-go">
+                            You
+                          </span>
+                          <button
+                            type="button"
+                            onClick={startEditing}
+                            className="shrink-0 text-xs text-ink-muted underline-offset-2 hover:underline"
+                          >
+                            Rename
+                          </button>
+                        </>
+                      )}
+                    </>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
+
+      <label className="flex items-center gap-2.5 rounded-xl border border-line bg-paper px-4 py-3 text-sm font-medium text-ink">
+        <input
+          type="checkbox"
+          checked={me?.ready ?? false}
+          onChange={(e) => send({ type: 'toggleReady', ready: e.target.checked })}
+          className="h-4 w-4 accent-go"
+        />
+        I'm ready
+      </label>
+
+      <button
+        type="button"
+        disabled={!allReady}
+        onClick={() => send({ type: 'start' })}
+        className="w-full rounded-full bg-go px-6 py-3 text-base font-semibold text-paper shadow-lg shadow-go/20 active:scale-95 transition disabled:bg-line disabled:text-ink-faint disabled:shadow-none"
+      >
+        {allReady ? 'Start match' : 'Waiting for everyone…'}
+      </button>
 
       <button
         type="button"
