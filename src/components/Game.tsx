@@ -239,7 +239,9 @@ function WinnerView({
       <div className="fixed inset-0 z-50 flex flex-col overflow-hidden bg-staff text-ink">
         <ReactionParticles lastReaction={lastReaction} />
         <div className="flex shrink-0 flex-col items-center gap-4 px-6 pt-10 pb-4">
-          {header}
+          {/* Once the lobby has slid up, the winner banner fades away so the
+              room can focus on getting the next match going (smileys stay). */}
+          <div className="animate-winner-fade">{header}</div>
           {smileys}
         </div>
         <div className="relative z-10 flex min-h-0 flex-1 items-end justify-center px-4 pb-4">

@@ -210,23 +210,17 @@ export class Main extends Server {
       }
       case 'visibility': {
         const entry = this.ensurePlayer(connection.id);
-        const wasVisible = entry.visible;
         entry.visible = Boolean(msg.visible);
         if (!entry.visible) {
           // Backgrounded players can't drive the lobby — clear ready so a
           // forgotten tab can't keep the room "ready" by accident.
           entry.ready = false;
-          // Mid-round, auto-eliminate so the away player doesn't haunt the
-          // jousting phase forever. resetToLobby() clears this for next round.
-          if (this.phase === 'ready' || this.phase === 'jousting') {
-            entry.eliminated = true;
-          }
+          // Mid-round we deliberately do NOT eliminate: a phone that briefly
+          // backgrounds (notification, a flick to standby) keeps playing and can
+          // still win when it comes back. (Clients also hold a screen wake lock
+          // to keep this rare.) Holding still is the whole game, after all.
         }
         this.broadcastState();
-        // A forced elimination can drop the room to one survivor.
-        if (!entry.visible && wasVisible && this.phase === 'jousting') {
-          this.checkWinCondition();
-        }
         break;
       }
       case 'start': {

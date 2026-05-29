@@ -9,6 +9,7 @@ import { useShakeDetector } from '../hooks/useShakeDetector';
 import { useMatchMusic } from '../hooks/useMatchMusic';
 import { useServerClock } from '../hooks/useServerClock';
 import { useSyncedTempo } from '../hooks/useSyncedTempo';
+import { useWakeLock } from '../hooks/useWakeLock';
 import { TEMPO_THRESHOLD, type Tempo } from '../lib/tempo';
 import { useI18n } from '../i18n/I18nContext';
 
@@ -170,6 +171,10 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
   // Game overlay reads lastShakeAt from this to detect "moved too fast".
   const detector = useShakeDetector(JOUST_THRESHOLD);
 
+  // Keep the screen awake for the whole time in a room: a phone slipping into
+  // standby hides the page, which the server treats as "away".
+  useWakeLock(true);
+
   const socket = usePartySocket({
     host: PARTY_HOST,
     party: 'main',
@@ -256,7 +261,9 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
 
   // Looping match soundtrack: starts when the "Get Ready" countdown hits zero
   // (readyEndsAt) — in lockstep across devices via the server clock — shifts
-  // tempo with the room, and goes silent for this player while eliminated.
+  // tempo with the room, and goes silent for this player while eliminated. It
+  // only runs while a round is live (any non-lobby phase); back in the lobby it
+  // fades out so it never plays before the next match starts.
   const me = players.find((p) => p.id === myId);
   useMatchMusic(
     readyEndsAt,
@@ -264,6 +271,7 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
     toLocalTime,
     tempo,
     tempoEffectiveAt,
+    phase !== 'lobby',
   );
 
   // Match the shake sensitivity to the tempo, in lockstep with the music:
