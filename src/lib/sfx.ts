@@ -1,7 +1,11 @@
-// Sound effects synthesized with the Web Audio API — no audio files to ship.
-// The context is created lazily and resumed on demand; by the time any SFX
-// plays the player has already interacted (tapped "I'm ready"/"Start"), which
-// satisfies the browser autoplay policy.
+// Sound effects. Reactions are synthesized with the Web Audio API; the applause
+// and elimination cues are short sampled clips, decoded once and played through
+// the same context. The context is created lazily and resumed on demand; by the
+// time any SFX plays the player has already interacted (tapped "I'm
+// ready"/"Start"), which satisfies the browser autoplay policy.
+
+import applauseUrl from '../assets/applause.mp3';
+import eliminateUrl from '../assets/eliminate.mp3';
 
 type WebkitWindow = Window & { webkitAudioContext?: typeof AudioContext };
 
@@ -18,6 +22,21 @@ function getCtx(): AudioContext | null {
   return ctx;
 }
 
+// Decode a sampled clip once and cache the (promise of the) AudioBuffer, so each
+// cue is fetched/decoded a single time and replayed instantly thereafter.
+const bufferCache = new Map<string, Promise<AudioBuffer | null>>();
+function loadBuffer(ac: AudioContext, url: string): Promise<AudioBuffer | null> {
+  let cached = bufferCache.get(url);
+  if (!cached) {
+    cached = fetch(url)
+      .then((r) => r.arrayBuffer())
+      .then((data) => ac.decodeAudioData(data))
+      .catch(() => null);
+    bufferCache.set(url, cached);
+  }
+  return cached;
+}
+
 // Short melodic blip per reaction — distinct enough to tell apart by ear, all
 // played on every device when any player taps a smiley.
 const REACTION_NOTES: Record<
@@ -30,135 +49,58 @@ const REACTION_NOTES: Record<
   dancerF: { type: 'sine', freqs: [587, 740, 988], step: 0.06, dur: 0.1, gain: 0.22 }, // brighter arpeggio up
 };
 
-// A single hand-clap: a tiny noise burst shaped by a band-pass and a snappy
-// envelope. Pitch and timing are jittered so repeated claps don't sound robotic.
-function clapAt(ac: AudioContext, t0: number, gain: number) {
-  const dur = 0.028;
-  const buf = ac.createBuffer(1, Math.ceil(ac.sampleRate * dur), ac.sampleRate);
-  const d = buf.getChannelData(0);
-  for (let i = 0; i < d.length; i++) {
-    // Fade the noise across the burst so it cracks rather than ticks.
-    d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
-  }
-  const src = ac.createBufferSource();
-  src.buffer = buf;
-  const bp = ac.createBiquadFilter();
-  bp.type = 'bandpass';
-  bp.frequency.value = 1100 + Math.random() * 1100; // 1.1–2.2 kHz
-  bp.Q.value = 0.8;
-  const g = ac.createGain();
-  g.gain.setValueAtTime(gain, t0);
-  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-  src.connect(bp).connect(g).connect(ac.destination);
-  src.start(t0);
-  src.stop(t0 + dur + 0.01);
-}
-
 export const sfx = {
-  // A single hand-clap from THIS device. The winner screen drives these in an
-  // enduring, randomly-timed pattern on every losing phone for the length of the
-  // celebration, so one phone reads as a single person clapping and a roomful of
-  // phones blends into a steady crowd (the winner's own phone stays quiet).
-  clap() {
+  // Looping applause clip, started on every losing phone for the length of the
+  // winner celebration. Each phone plays it at a slightly randomized pitch +
+  // speed so a roomful of phones doesn't loop in lockstep — the offsets blend
+  // into a natural, sustained crowd. Returns a stopper the caller runs to end it
+  // (the winner's own phone never starts it).
+  applause(): () => void {
     const ac = getCtx();
-    if (!ac) return;
-    clapAt(ac, ac.currentTime + Math.random() * 0.02, 0.3 + Math.random() * 0.3);
+    if (!ac) return () => {};
+    let stopped = false;
+    let src: AudioBufferSourceNode | null = null;
+    const gain = ac.createGain();
+    gain.gain.value = 0.9;
+    gain.connect(ac.destination);
+    void loadBuffer(ac, applauseUrl).then((buf) => {
+      if (!buf || stopped) return;
+      src = ac.createBufferSource();
+      src.buffer = buf;
+      src.loop = true;
+      src.playbackRate.value = 0.9 + Math.random() * 0.2; // 0.9–1.1× (pitch + speed)
+      src.connect(gain);
+      src.start();
+    });
+    return () => {
+      stopped = true;
+      if (src) {
+        try {
+          src.stop();
+        } catch {
+          // already stopped
+        }
+        src.disconnect();
+      }
+      gain.disconnect();
+    };
   },
 
-  // The moment you're eliminated: a microphone yanked from the jack. Layers a
-  // sharp click (the plug pull), a deep body thump with a sub-bass drop, a
-  // feedback growl that is hard-gated to silence mid-cry (rather than decaying),
-  // and an electrical static burst — the harsh layers run through soft clipping
-  // for bite. Tuned to land low and loud: a gut-punch rather than a shriek.
+  // The moment you're eliminated: a guitar/amp "yank" clip, played once at a
+  // slight random pitch so repeated eliminations don't sound identical.
   screech() {
     const ac = getCtx();
     if (!ac) return;
-    const now = ac.currentTime;
-
-    // Soft clipper + master, shared by the harsh layers.
-    const shaper = ac.createWaveShaper();
-    const n = 1024;
-    const curve = new Float32Array(n);
-    for (let i = 0; i < n; i++) {
-      const x = (i / (n - 1)) * 2 - 1;
-      curve[i] = Math.tanh(3 * x);
-    }
-    shaper.curve = curve;
-    const master = ac.createGain();
-    master.gain.value = 0.95; // louder overall
-    shaper.connect(master).connect(ac.destination);
-
-    // 1) Sharp click/pop transient — the physical plug-pull "thunk".
-    const click = ac.createOscillator();
-    click.type = 'square';
-    click.frequency.setValueAtTime(620, now);
-    const clickGain = ac.createGain();
-    clickGain.gain.setValueAtTime(0.9, now);
-    clickGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.012);
-    click.connect(clickGain).connect(shaper);
-    click.start(now);
-    click.stop(now + 0.02);
-
-    // 2) Low body thump (kept round — bypasses the clipper). The dominant
-    // layer, so the screech reads as a deep "thunk" rather than a high cry.
-    // Deeper and longer than before for more weight.
-    const thump = ac.createOscillator();
-    thump.type = 'sine';
-    thump.frequency.setValueAtTime(120, now);
-    thump.frequency.exponentialRampToValueAtTime(30, now + 0.2);
-    const thumpGain = ac.createGain();
-    thumpGain.gain.setValueAtTime(0.0001, now);
-    thumpGain.gain.exponentialRampToValueAtTime(1.3, now + 0.006);
-    thumpGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.3);
-    thump.connect(thumpGain).connect(master);
-    thump.start(now);
-    thump.stop(now + 0.32);
-
-    // 2b) Sub-bass drop felt more than heard — adds depth under the thump.
-    const sub = ac.createOscillator();
-    sub.type = 'sine';
-    sub.frequency.setValueAtTime(70, now);
-    sub.frequency.exponentialRampToValueAtTime(24, now + 0.26);
-    const subGain = ac.createGain();
-    subGain.gain.setValueAtTime(0.0001, now);
-    subGain.gain.exponentialRampToValueAtTime(0.9, now + 0.012);
-    subGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.34);
-    sub.connect(subGain).connect(master);
-    sub.start(now);
-    sub.stop(now + 0.36);
-
-    // 3) Feedback growl that abruptly cuts to silence (gated), not decays.
-    // Pitched well down so it growls low rather than shrieks.
-    const squealDur = 0.13;
-    const squeal = ac.createOscillator();
-    squeal.type = 'sawtooth';
-    squeal.frequency.setValueAtTime(520, now);
-    squeal.frequency.linearRampToValueAtTime(700, now + squealDur);
-    const squealGain = ac.createGain();
-    squealGain.gain.setValueAtTime(0.0001, now);
-    squealGain.gain.exponentialRampToValueAtTime(0.4, now + 0.01);
-    squealGain.gain.setValueAtTime(0.4, now + squealDur - 0.001); // hold full…
-    squealGain.gain.setValueAtTime(0.0001, now + squealDur); // …then hard cut
-    squeal.connect(squealGain).connect(shaper);
-    squeal.start(now);
-    squeal.stop(now + squealDur + 0.01);
-
-    // 4) Electrical static burst (low-rumble flavour).
-    const noiseDur = 0.1;
-    const noiseBuf = ac.createBuffer(1, Math.ceil(ac.sampleRate * noiseDur), ac.sampleRate);
-    const data = noiseBuf.getChannelData(0);
-    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
-    const noise = ac.createBufferSource();
-    noise.buffer = noiseBuf;
-    const hp = ac.createBiquadFilter();
-    hp.type = 'highpass';
-    hp.frequency.value = 300;
-    const noiseGain = ac.createGain();
-    noiseGain.gain.setValueAtTime(0.4, now);
-    noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + noiseDur);
-    noise.connect(hp).connect(noiseGain).connect(shaper);
-    noise.start(now);
-    noise.stop(now + noiseDur);
+    void loadBuffer(ac, eliminateUrl).then((buf) => {
+      if (!buf) return;
+      const src = ac.createBufferSource();
+      src.buffer = buf;
+      src.playbackRate.value = 0.94 + Math.random() * 0.12; // ~±1 semitone
+      const gain = ac.createGain();
+      gain.gain.value = 1;
+      src.connect(gain).connect(ac.destination);
+      src.start();
+    });
   },
 
   // A smiley tap: plays on every device (wired to the broadcast reaction event).
@@ -183,3 +125,4 @@ export const sfx = {
     });
   },
 };
+
