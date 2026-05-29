@@ -53,6 +53,21 @@
   .animate-sheet-up {
     animation: sheet-up 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
   }
+
+  /* Post-game: the winner banner lingers a beat as the lobby slides up, then
+     fades out so attention shifts to starting the next match. */
+  @keyframes winner-fade {
+    0%,
+    40% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+  .animate-winner-fade {
+    animation: winner-fade 1.6s ease-out forwards;
+  }
 }
 
 @layer components {
