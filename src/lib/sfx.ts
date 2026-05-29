@@ -55,19 +55,14 @@ function clapAt(ac: AudioContext, t0: number, gain: number) {
 }
 
 export const sfx = {
-  // A short burst of applause from THIS device — a handful of staggered claps.
-  // One phone reads as a single person clapping; in a room full of phones the
-  // overlapping bursts blend into a proper crowd. Played on the losers' phones
-  // when a winner is crowned (the winner's own phone stays quiet).
-  applause() {
+  // A single hand-clap from THIS device. The winner screen drives these in an
+  // enduring, randomly-timed pattern on every losing phone for the length of the
+  // celebration, so one phone reads as a single person clapping and a roomful of
+  // phones blends into a steady crowd (the winner's own phone stays quiet).
+  clap() {
     const ac = getCtx();
     if (!ac) return;
-    const claps = 3 + Math.floor(Math.random() * 3); // 3–5 claps
-    let t = ac.currentTime + Math.random() * 0.3; // jittered start so phones don't unison
-    for (let i = 0; i < claps; i++) {
-      clapAt(ac, t, 0.35 + Math.random() * 0.3);
-      t += 0.1 + Math.random() * 0.22; // 100–320 ms apart
-    }
+    clapAt(ac, ac.currentTime + Math.random() * 0.02, 0.3 + Math.random() * 0.3);
   },
 
   // The moment you're eliminated: a microphone yanked from the jack. Layers a

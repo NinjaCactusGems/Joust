@@ -22,10 +22,11 @@ const PLAYER_NAME_KEY = 'joust:playerName';
 // shifts move it to Sensitive (slow) or Forgiving (fast) mid-round.
 const JOUST_THRESHOLD = TEMPO_THRESHOLD.normal;
 
-// After a win the server returns to the lobby, but we keep the soundtrack going
-// this much longer so it rides through the celebration and fades out as the
-// post-game lobby panel fades in, rather than cutting the moment it appears.
-const POSTGAME_MUSIC_HOLD_MS = 1000;
+// After a win the server returns to the lobby, but we keep the celebration
+// (soundtrack + applause) going this much longer so it rides through the
+// transition and ends as the post-game lobby panel fades in, rather than
+// cutting the moment it appears.
+const POSTGAME_HOLD_MS = 1000;
 
 // Teams unlock at 3+ players (below that it's a free-for-all). Kept in sync with
 // the server's MIN_PLAYERS_FOR_TEAMS.
@@ -282,11 +283,25 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
       setMusicActive(false);
       return;
     }
-    const id = window.setTimeout(
-      () => setMusicActive(false),
-      POSTGAME_MUSIC_HOLD_MS,
-    );
+    const id = window.setTimeout(() => setMusicActive(false), POSTGAME_HOLD_MS);
     return () => window.clearTimeout(id);
+  }, [phase, postGameWinnerId, postGameWinnerTeam]);
+
+  // Whether to keep applauding. Active for the whole winner phase, then held a
+  // beat into the post-game so the claps endure until the lobby panel has faded
+  // in — mirroring the music. (Distinct from musicActive, which also covers
+  // ready/jousting, where we don't clap.)
+  const [celebrating, setCelebrating] = useState(false);
+  useEffect(() => {
+    if (phase === 'winner') {
+      setCelebrating(true);
+      return;
+    }
+    if (phase === 'lobby' && (postGameWinnerId || postGameWinnerTeam)) {
+      const id = window.setTimeout(() => setCelebrating(false), POSTGAME_HOLD_MS);
+      return () => window.clearTimeout(id);
+    }
+    setCelebrating(false);
   }, [phase, postGameWinnerId, postGameWinnerTeam]);
 
   // Looping match soundtrack: starts when the "Get Ready" countdown hits zero
@@ -307,17 +322,31 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
     detector.setThreshold(TEMPO_THRESHOLD[next]),
   );
 
-  // When a winner is crowned, the losers' phones applaud — a sparse burst each,
-  // so a roomful of phones blends into a real crowd. The winner's own phone
-  // stays quiet (they're the one being clapped for). Fires once per round, as
-  // the server flips to the 'winner' phase.
+  // When a winner is crowned, the losers' phones applaud — each phone claps in
+  // its own enduring, randomly-timed pattern, so one phone reads as a single
+  // person and a roomful blends into a steady crowd. It runs the whole winner
+  // phase and a beat into the post-game (via `celebrating`), ending as the lobby
+  // panel fades in. The winner's own phone stays quiet. The live winner fields
+  // go null once the server resets to the lobby, so fall back to the post-game
+  // copies to keep clapping through the transition.
   const myTeam = me?.team ?? null;
+  const effWinnerId = winnerId ?? postGameWinnerId;
+  const effWinnerTeam = winnerTeam ?? postGameWinnerTeam;
   useEffect(() => {
-    if (phase !== 'winner') return;
-    if (winnerId === null && winnerTeam === null) return;
-    const iWon = winnerTeam ? myTeam === winnerTeam : winnerId === myId;
-    if (!iWon) sfx.applause();
-  }, [phase, winnerId, winnerTeam, myId, myTeam]);
+    if (!celebrating) return;
+    if (effWinnerId === null && effWinnerTeam === null) return;
+    const iWon = effWinnerTeam
+      ? myTeam === effWinnerTeam
+      : effWinnerId === myId;
+    if (iWon) return;
+    let timer = 0;
+    const loop = () => {
+      sfx.clap();
+      timer = window.setTimeout(loop, 160 + Math.random() * 360); // 160–520 ms
+    };
+    loop();
+    return () => window.clearTimeout(timer);
+  }, [celebrating, effWinnerId, effWinnerTeam, myId, myTeam]);
 
   const send = (msg: unknown) => {
     if (status === 'open') socket.send(JSON.stringify(msg));
