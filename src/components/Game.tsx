@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { MusicNotes } from './MusicNotes';
+import { useI18n } from '../i18n/I18nContext';
 import { haptics } from '../lib/haptics';
 import { sfx } from '../lib/sfx';
 import type { useShakeDetector } from '../hooks/useShakeDetector';
@@ -50,6 +51,7 @@ export function Game(props: GameProps) {
 // each second, a larger buzz on "Go". The server flips everyone to jousting
 // when the timer ends.
 function ReadyView({ readyEndsAt }: { readyEndsAt: number | null }) {
+  const { t } = useI18n();
   const [secondsLeft, setSecondsLeft] = useState(() =>
     readyEndsAt ? Math.max(0, Math.ceil((readyEndsAt - Date.now()) / 1000)) : 0,
   );
@@ -78,7 +80,7 @@ function ReadyView({ readyEndsAt }: { readyEndsAt: number | null }) {
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 bg-staff text-ink">
       <div className="text-sm font-semibold uppercase tracking-[0.3em] text-ink-muted">
-        Get Ready
+        {t('game.getReady')}
       </div>
       {secondsLeft > 0 ? (
         <div className="font-serif text-9xl font-bold tabular-nums">
@@ -86,10 +88,10 @@ function ReadyView({ readyEndsAt }: { readyEndsAt: number | null }) {
         </div>
       ) : (
         <div className="font-serif text-8xl font-bold tracking-tight text-go">
-          GO!
+          {t('game.go')}
         </div>
       )}
-      <div className="text-sm text-ink-muted">Hold still…</div>
+      <div className="text-sm text-ink-muted">{t('game.holdStillEllipsis')}</div>
     </div>
   );
 }
@@ -103,6 +105,7 @@ function JoustingView({
   detector,
   onEliminate,
 }: GameProps) {
+  const { t } = useI18n();
   const me = players.find((p) => p.id === myId);
   const iAmOut = me?.eliminated ?? false;
 
@@ -139,14 +142,16 @@ function JoustingView({
       <MusicNotes />
       {iAmOut ? (
         <div className="relative z-10 flex flex-col items-center gap-3">
-          <div className="font-serif text-8xl font-bold tracking-tight">OUT</div>
+          <div className="font-serif text-8xl font-bold tracking-tight">
+            {t('game.out')}
+          </div>
           <div className="text-sm uppercase tracking-[0.3em] text-paper/80">
-            {aliveCount} still in
+            {t('game.stillIn', { count: aliveCount })}
           </div>
         </div>
       ) : (
         <div className="relative z-10 text-sm font-semibold uppercase tracking-[0.4em] text-paper/70">
-          Hold still
+          {t('game.holdStill')}
         </div>
       )}
     </div>
@@ -166,6 +171,7 @@ function WinnerView({
   postGame,
   lobbySheet,
 }: GameProps) {
+  const { t } = useI18n();
   const winner = players.find((p) => p.id === winnerId);
   const iWon = winnerId !== null && winnerId === myId;
 
@@ -184,10 +190,10 @@ function WinnerView({
   const header = (
     <div className="relative z-30 flex flex-col items-center gap-2">
       <div className="text-sm font-semibold uppercase tracking-[0.3em] text-ochre">
-        {iWon ? 'You win!' : 'Winner'}
+        {t(iWon ? 'game.youWin' : 'game.winner')}
       </div>
       <div className="font-serif text-5xl font-bold tracking-tight text-center px-6">
-        {winner?.name ?? 'No one'}
+        {winner?.name ?? t('game.noOne')}
       </div>
     </div>
   );
@@ -234,7 +240,7 @@ function WinnerView({
       {smileys}
       {secondsLeft > 0 && (
         <div className="relative z-30 text-sm text-ink-muted">
-          Back to lobby in {secondsLeft}…
+          {t('game.backToLobby', { seconds: secondsLeft })}
         </div>
       )}
     </div>

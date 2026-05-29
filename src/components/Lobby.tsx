@@ -9,6 +9,7 @@ import { useMatchMusic } from '../hooks/useMatchMusic';
 import { useServerClock } from '../hooks/useServerClock';
 import { useSyncedTempo } from '../hooks/useSyncedTempo';
 import { TEMPO_THRESHOLD, type Tempo } from '../lib/tempo';
+import { useI18n } from '../i18n/I18nContext';
 
 const PARTY_HOST = import.meta.env.VITE_PARTY_HOST || 'localhost:1999';
 
@@ -72,27 +73,24 @@ export function Lobby() {
 }
 
 function IdleLobby({ onEnter }: { onEnter: (code: string) => void }) {
+  const { t } = useI18n();
   const [joinCode, setJoinCode] = useState('');
   const normalized = normalizeRoomCode(joinCode);
   const canJoin = normalized.length >= 3;
 
   return (
     <div className="w-full max-w-sm rounded-2xl border border-line bg-paper-raised/80 p-5 flex flex-col gap-4">
-      <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-muted">
-        Lobby
-      </h2>
-
       <button
         type="button"
         onClick={() => onEnter(generateRoomCode())}
         className="w-full rounded-full bg-go px-6 py-3 text-base font-semibold text-paper shadow-lg shadow-go/20 active:scale-95 transition"
       >
-        Create group
+        {t('lobby.create')}
       </button>
 
       <div className="flex items-center gap-2 text-xs text-ink-faint">
         <div className="h-px flex-1 bg-line" />
-        <span>or</span>
+        <span>{t('lobby.or')}</span>
         <div className="h-px flex-1 bg-line" />
       </div>
 
@@ -109,7 +107,7 @@ function IdleLobby({ onEnter }: { onEnter: (code: string) => void }) {
           autoCapitalize="characters"
           autoCorrect="off"
           spellCheck={false}
-          placeholder="GROUP CODE"
+          placeholder={t('lobby.codePlaceholder')}
           value={joinCode}
           onChange={(e) => setJoinCode(e.target.value)}
           maxLength={8}
@@ -120,7 +118,7 @@ function IdleLobby({ onEnter }: { onEnter: (code: string) => void }) {
           disabled={!canJoin}
           className="w-full rounded-full bg-ink px-6 py-3 text-base font-semibold text-paper active:scale-95 transition disabled:bg-line disabled:text-ink-faint"
         >
-          Join
+          {t('lobby.join')}
         </button>
       </form>
     </div>
@@ -132,6 +130,7 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
   // across browser tabs (e.g. via localStorage) collides at the partyserver
   // layer — the second WS with the same id evicts the first, so only one
   // tab can stay connected at a time.
+  const { t } = useI18n();
   const myId = useMemo(() => crypto.randomUUID(), []);
   const myName = useRef(getPlayerName());
 
@@ -328,7 +327,7 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
     <div className="w-full max-w-sm rounded-2xl border border-line bg-paper-raised/80 p-5 flex flex-col gap-4">
       <div className="flex items-baseline justify-between">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-muted">
-          Group
+          {t('room.group')}
         </h2>
         <StatusBadge status={status} />
       </div>
@@ -346,17 +345,17 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
           onClick={copy}
           className="w-full rounded-full border border-line bg-paper px-4 py-2 text-sm font-medium text-ink active:scale-95 transition"
         >
-          {copied ? 'Link copied' : 'Copy share link'}
+          {t(copied ? 'room.linkCopied' : 'room.copyLink')}
         </button>
       </div>
 
       <div className="flex flex-col gap-2">
         <div className="text-xs uppercase tracking-wider text-ink-muted">
-          Players · {players.length}
+          {t('room.players', { count: players.length })}
         </div>
         {players.length === 0 ? (
           <div className="text-sm text-ink-faint italic">
-            Waiting for connection…
+            {t('room.waiting')}
           </div>
         ) : (
           <ul className="flex flex-col gap-1.5">
@@ -375,7 +374,13 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
                     className={`h-2 w-2 shrink-0 rounded-full ${
                       p.away ? 'bg-ink-faint' : p.ready ? 'bg-go' : 'bg-ink-faint'
                     }`}
-                    title={p.away ? 'Away' : p.ready ? 'Ready' : 'Not ready'}
+                    title={t(
+                      p.away
+                        ? 'room.away'
+                        : p.ready
+                          ? 'room.ready'
+                          : 'room.notReady',
+                    )}
                   />
                   {isMe && editing ? (
                     <form
@@ -398,7 +403,7 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
                         type="submit"
                         className="shrink-0 rounded-md bg-go px-2 py-1 text-xs font-semibold text-paper"
                       >
-                        Save
+                        {t('room.save')}
                       </button>
                     </form>
                   ) : (
@@ -408,20 +413,20 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
                       </span>
                       {p.away && (
                         <span className="shrink-0 rounded-full bg-line px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-ink-muted">
-                          Away
+                          {t('room.away')}
                         </span>
                       )}
                       {isMe && (
                         <>
                           <span className="shrink-0 rounded-full bg-go/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-go">
-                            You
+                            {t('room.you')}
                           </span>
                           <button
                             type="button"
                             onClick={startEditing}
                             className="shrink-0 rounded-md border border-line px-2 py-1 text-xs font-medium text-ink-muted active:scale-95 transition"
                           >
-                            Rename
+                            {t('room.rename')}
                           </button>
                         </>
                       )}
@@ -441,15 +446,12 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
           me?.ready ? 'bg-go shadow-go/25' : 'bg-eliminated shadow-eliminated/25'
         }`}
       >
-        {me?.ready ? 'Ready ✓' : 'Ready?'}
+        {t(me?.ready ? 'room.readyDone' : 'room.readyPrompt')}
       </button>
 
       {(detector.permissionState === 'denied' ||
         detector.permissionState === 'unavailable') && (
-        <p className="-mt-2 text-xs text-accent">
-          Motion sensing is off, so you can't be eliminated. Open
-          joust.ninja-cactus.com on a phone for the full game.
-        </p>
+        <p className="-mt-2 text-xs text-accent">{t('room.motionWarning')}</p>
       )}
 
       <button
@@ -458,7 +460,7 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
         onClick={() => send({ type: 'start' })}
         className="w-full rounded-full bg-go px-6 py-3 text-base font-semibold text-paper shadow-lg shadow-go/20 active:scale-95 transition disabled:bg-line disabled:text-ink-faint disabled:shadow-none"
       >
-        {allReady ? 'Start match' : 'Waiting for everyone…'}
+        {t(allReady ? 'room.startMatch' : 'room.waitingEveryone')}
       </button>
 
       <button
@@ -466,7 +468,7 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
         onClick={onLeave}
         className="w-full rounded-full bg-line px-6 py-3 text-sm font-semibold text-ink active:scale-95 transition"
       >
-        Leave
+        {t('room.leave')}
       </button>
     </div>
   );
@@ -496,14 +498,20 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
 }
 
 function StatusBadge({ status }: { status: 'connecting' | 'open' | 'closed' }) {
+  const { t } = useI18n();
   const styles =
     status === 'open'
       ? 'bg-go/15 text-go border-go/40'
       : status === 'connecting'
         ? 'bg-ochre/15 text-ochre border-ochre/40'
         : 'bg-accent/15 text-accent border-accent/40';
-  const label =
-    status === 'open' ? 'Connected' : status === 'connecting' ? 'Connecting' : 'Offline';
+  const label = t(
+    status === 'open'
+      ? 'status.connected'
+      : status === 'connecting'
+        ? 'status.connecting'
+        : 'status.offline',
+  );
   return (
     <span
       className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${styles}`}

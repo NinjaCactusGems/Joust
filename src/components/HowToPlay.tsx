@@ -1,10 +1,14 @@
 import { useId, useState } from 'react';
+import { useI18n } from '../i18n/I18nContext';
+import { howToPlayRules } from '../i18n/richText';
 
 // Collapsible "How to play" disclosure shown between the title and the lobby.
 // Tapping the header toggles a panel that explains the rules.
 export function HowToPlay() {
+  const { t, locale } = useI18n();
   const [open, setOpen] = useState(false);
   const panelId = useId();
+  const rules = howToPlayRules[locale];
 
   return (
     <div className="w-full max-w-sm">
@@ -22,7 +26,7 @@ export function HowToPlay() {
           ?
         </span>
         <span className="flex-1 text-sm font-semibold uppercase tracking-wider text-ink-muted">
-          How to play
+          {t('howToPlay.title')}
         </span>
         <span
           aria-hidden="true"
@@ -39,51 +43,20 @@ export function HowToPlay() {
         hidden={!open}
         className="mt-2 rounded-2xl border border-line bg-paper-raised/80 px-5 py-4 text-sm leading-relaxed text-ink"
       >
-        <p className="text-ink-muted">
-          Joust is a game of movement and balance — played in the real world,
-          phone in hand.
-        </p>
+        <p className="text-ink-muted">{t('howToPlay.intro')}</p>
         <ol className="mt-3 flex flex-col gap-3.5">
-          <li className="flex gap-2.5">
-            <span className="font-serif font-bold text-accent">1.</span>
-            <span className="flex min-w-0 flex-1 flex-col gap-1.5">
-              <span>
-                Hold your phone out, <strong>away from your body</strong>, and
-                keep it steady.
-              </span>
-              <BulletFigure n={1} />
-            </span>
-          </li>
-          <li className="flex gap-2.5">
-            <span className="font-serif font-bold text-accent">2.</span>
-            <span className="flex min-w-0 flex-1 flex-col gap-1.5">
-              <span>
-                <strong>Dance and weave</strong> around the other players
-                without jostling your own phone.
-              </span>
-              <BulletFigure n={2} />
-            </span>
-          </li>
-          <li className="flex gap-2.5">
-            <span className="font-serif font-bold text-accent">3.</span>
-            <span className="flex min-w-0 flex-1 flex-col gap-1.5">
-              <span>
-                Make rivals move too quickly — a{' '}
-                <strong>touch on the arm</strong> is fair game. Move your phone
-                too fast and you're out.
-              </span>
-              <BulletFigure n={3} />
-            </span>
-          </li>
-          <li className="flex gap-2.5">
-            <span className="font-serif font-bold text-accent">4.</span>
-            <span className="flex min-w-0 flex-1 flex-col gap-1.5">
-              <span>
-                Be the <strong>last one standing</strong> to win the joust.
-              </span>
-              <BulletFigure n={4} />
-            </span>
-          </li>
+          {rules.map((rule, i) => {
+            const n = (i + 1) as 1 | 2 | 3 | 4;
+            return (
+              <li key={n} className="flex gap-2.5">
+                <span className="font-serif font-bold text-accent">{n}.</span>
+                <span className="flex min-w-0 flex-1 flex-col gap-1.5">
+                  <span>{rule()}</span>
+                  <BulletFigure n={n} />
+                </span>
+              </li>
+            );
+          })}
         </ol>
       </div>
     </div>
