@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import musicUrl from '../assets/match-music.mp3';
+import musicUrl from '../assets/match-music.m4a';
 
 const TARGET_VOLUME = 0.85;
 const FADE_IN_MS = 200;
