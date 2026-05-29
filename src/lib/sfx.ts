@@ -53,15 +53,17 @@ export const sfx = {
   // Looping applause clip, started on every losing phone for the length of the
   // winner celebration. Each phone plays it at a slightly randomized pitch +
   // speed so a roomful of phones doesn't loop in lockstep — the offsets blend
-  // into a natural, sustained crowd. Returns a stopper the caller runs to end it
-  // (the winner's own phone never starts it).
-  applause(): () => void {
+  // into a natural, sustained crowd. Briefly fades in to avoid a click. Returns
+  // a stopper the caller runs to end it — pass a fade duration (ms) to have it
+  // die down slowly rather than cut (the winner's own phone never starts it).
+  applause(): (fadeMs?: number) => void {
     const ac = getCtx();
     if (!ac) return () => {};
+    const TARGET = 0.9;
     let stopped = false;
     let src: AudioBufferSourceNode | null = null;
     const gain = ac.createGain();
-    gain.gain.value = 0.9;
+    gain.gain.value = 0.0001;
     gain.connect(ac.destination);
     void loadBuffer(ac, applauseUrl).then((buf) => {
       if (!buf || stopped) return;
@@ -70,19 +72,43 @@ export const sfx = {
       src.loop = true;
       src.playbackRate.value = 0.9 + Math.random() * 0.2; // 0.9–1.1× (pitch + speed)
       src.connect(gain);
+      const t = ac.currentTime;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(TARGET, t + 0.25); // short fade-in
       src.start();
     });
-    return () => {
+    return (fadeMs = 0) => {
+      if (stopped) return;
       stopped = true;
-      if (src) {
+      const s = src;
+      if (!s) {
+        // Never started (buffer still loading) — the loader above bails on stopped.
+        gain.disconnect();
+        return;
+      }
+      const t = ac.currentTime;
+      const fade = Math.max(0, fadeMs) / 1000;
+      try {
+        gain.gain.cancelScheduledValues(t);
+        gain.gain.setValueAtTime(Math.max(0.0001, gain.gain.value), t);
+        gain.gain.linearRampToValueAtTime(0, t + fade); // slow die-down
+        s.stop(t + fade + 0.02);
+        s.onended = () => {
+          try {
+            s.disconnect();
+          } catch {
+            // already disconnected
+          }
+          gain.disconnect();
+        };
+      } catch {
         try {
-          src.stop();
+          s.stop();
         } catch {
           // already stopped
         }
-        src.disconnect();
+        gain.disconnect();
       }
-      gain.disconnect();
     };
   },
 

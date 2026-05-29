@@ -22,11 +22,16 @@ const PLAYER_NAME_KEY = 'joust:playerName';
 // shifts move it to Sensitive (slow) or Forgiving (fast) mid-round.
 const JOUST_THRESHOLD = TEMPO_THRESHOLD.normal;
 
-// After a win the server returns to the lobby, but we keep the celebration
-// (soundtrack + applause) going this much longer so it rides through the
-// transition and ends as the post-game lobby panel fades in, rather than
-// cutting the moment it appears.
+// After a win the server returns to the lobby, but we keep the soundtrack going
+// this much longer so it rides through the transition and fades out as the
+// post-game lobby panel fades in, rather than cutting the moment it appears.
 const POSTGAME_HOLD_MS = 1000;
+
+// Applause timing on the losing phones: a beat of silence after the winner is
+// revealed before it starts, then a slow fade-out timed to finish as the lobby
+// comes in (i.e. ending at winnerEndsAt), so it dies down rather than cuts.
+const APPLAUSE_START_DELAY_MS = 1000;
+const APPLAUSE_FADE_OUT_MS = 2500;
 
 // Teams unlock at 3+ players (below that it's a free-for-all). Kept in sync with
 // the server's MIN_PLAYERS_FOR_TEAMS.
@@ -287,23 +292,6 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
     return () => window.clearTimeout(id);
   }, [phase, postGameWinnerId, postGameWinnerTeam]);
 
-  // Whether to keep applauding. Active for the whole winner phase, then held a
-  // beat into the post-game so the claps endure until the lobby panel has faded
-  // in — mirroring the music. (Distinct from musicActive, which also covers
-  // ready/jousting, where we don't clap.)
-  const [celebrating, setCelebrating] = useState(false);
-  useEffect(() => {
-    if (phase === 'winner') {
-      setCelebrating(true);
-      return;
-    }
-    if (phase === 'lobby' && (postGameWinnerId || postGameWinnerTeam)) {
-      const id = window.setTimeout(() => setCelebrating(false), POSTGAME_HOLD_MS);
-      return () => window.clearTimeout(id);
-    }
-    setCelebrating(false);
-  }, [phase, postGameWinnerId, postGameWinnerTeam]);
-
   // Looping match soundtrack: starts when the "Get Ready" countdown hits zero
   // (readyEndsAt) — in lockstep across devices via the server clock — shifts
   // tempo with the room, and goes silent for this player while eliminated.
@@ -324,23 +312,41 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
 
   // When a winner is crowned, the losers' phones applaud — each phone loops the
   // applause clip at a slightly randomized pitch/speed, so a roomful of phones
-  // blends into a sustained crowd. It runs the whole winner phase and a beat into
-  // the post-game (via `celebrating`), ending as the lobby panel fades in. The
-  // winner's own phone stays quiet. The live winner fields go null once the
-  // server resets to the lobby, so fall back to the post-game copies to keep the
-  // applause going through the transition.
+  // blends into a sustained crowd. It waits a beat after the reveal, then fades
+  // out slowly so it has died down by the time the lobby comes in (winnerEndsAt).
+  // The winner's own phone stays quiet.
   const myTeam = me?.team ?? null;
-  const effWinnerId = winnerId ?? postGameWinnerId;
-  const effWinnerTeam = winnerTeam ?? postGameWinnerTeam;
   useEffect(() => {
-    if (!celebrating) return;
-    if (effWinnerId === null && effWinnerTeam === null) return;
-    const iWon = effWinnerTeam
-      ? myTeam === effWinnerTeam
-      : effWinnerId === myId;
+    if (phase !== 'winner') return;
+    if (winnerId === null && winnerTeam === null) return;
+    const iWon = winnerTeam ? myTeam === winnerTeam : winnerId === myId;
     if (iWon) return;
-    return sfx.applause();
-  }, [celebrating, effWinnerId, effWinnerTeam, myId, myTeam]);
+
+    let stop: ((fadeMs?: number) => void) | null = null;
+    let fadeTimer = 0;
+    const startTimer = window.setTimeout(() => {
+      stop = sfx.applause();
+      // Schedule the slow fade so it finishes as the lobby slides in.
+      if (winnerEndsAt !== null) {
+        const fadeAt = toLocalTime(winnerEndsAt) - APPLAUSE_FADE_OUT_MS;
+        fadeTimer = window.setTimeout(
+          () => {
+            stop?.(APPLAUSE_FADE_OUT_MS);
+            stop = null;
+          },
+          Math.max(0, fadeAt - Date.now()),
+        );
+      }
+    }, APPLAUSE_START_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(startTimer);
+      window.clearTimeout(fadeTimer);
+      // Torn down before the scheduled fade (left the room, or the transition
+      // beat us to it) — still fade rather than cut.
+      stop?.(APPLAUSE_FADE_OUT_MS);
+    };
+  }, [phase, winnerId, winnerTeam, winnerEndsAt, myId, myTeam, toLocalTime]);
 
   const send = (msg: unknown) => {
     if (status === 'open') socket.send(JSON.stringify(msg));
