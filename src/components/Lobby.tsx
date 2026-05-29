@@ -322,13 +322,13 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
     detector.setThreshold(TEMPO_THRESHOLD[next]),
   );
 
-  // When a winner is crowned, the losers' phones applaud — each phone claps in
-  // its own enduring, randomly-timed pattern, so one phone reads as a single
-  // person and a roomful blends into a steady crowd. It runs the whole winner
-  // phase and a beat into the post-game (via `celebrating`), ending as the lobby
-  // panel fades in. The winner's own phone stays quiet. The live winner fields
-  // go null once the server resets to the lobby, so fall back to the post-game
-  // copies to keep clapping through the transition.
+  // When a winner is crowned, the losers' phones applaud — each phone loops the
+  // applause clip at a slightly randomized pitch/speed, so a roomful of phones
+  // blends into a sustained crowd. It runs the whole winner phase and a beat into
+  // the post-game (via `celebrating`), ending as the lobby panel fades in. The
+  // winner's own phone stays quiet. The live winner fields go null once the
+  // server resets to the lobby, so fall back to the post-game copies to keep the
+  // applause going through the transition.
   const myTeam = me?.team ?? null;
   const effWinnerId = winnerId ?? postGameWinnerId;
   const effWinnerTeam = winnerTeam ?? postGameWinnerTeam;
@@ -339,13 +339,7 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
       ? myTeam === effWinnerTeam
       : effWinnerId === myId;
     if (iWon) return;
-    let timer = 0;
-    const loop = () => {
-      sfx.clap();
-      timer = window.setTimeout(loop, 160 + Math.random() * 360); // 160–520 ms
-    };
-    loop();
-    return () => window.clearTimeout(timer);
+    return sfx.applause();
   }, [celebrating, effWinnerId, effWinnerTeam, myId, myTeam]);
 
   const send = (msg: unknown) => {
