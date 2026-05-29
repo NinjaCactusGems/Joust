@@ -26,6 +26,9 @@ export const en = {
   'room.rename': 'Rename',
   'room.readyDone': 'Ready ✓',
   'room.readyPrompt': 'Ready?',
+  'room.team': 'Team',
+  'room.teamSolo': 'No team (solo)',
+  'room.needTeams': 'Need at least two sides',
   'room.motionWarning':
     "Motion sensing is off, so you can't be eliminated. Open joust.ninja-cactus.com on a phone for the full game.",
   'room.startMatch': 'Start match',
@@ -44,6 +47,7 @@ export const en = {
   'game.stillIn': '{count} still in',
   'game.youWin': 'You win!',
   'game.winner': 'Winner',
+  'game.teamWins': '{team} win!',
   'game.noOne': 'No one',
   'game.backToLobby': 'Back to lobby in {seconds}…',
 } as const;
@@ -73,6 +77,9 @@ export const de: Record<TranslationKey, string> = {
   'room.rename': 'Umbenennen',
   'room.readyDone': 'Bereit ✓',
   'room.readyPrompt': 'Bereit?',
+  'room.team': 'Team',
+  'room.teamSolo': 'Kein Team (allein)',
+  'room.needTeams': 'Mindestens zwei Seiten nötig',
   'room.motionWarning':
     'Die Bewegungserkennung ist aus, du kannst also nicht ausscheiden. Öffne joust.ninja-cactus.com auf einem Handy für das volle Spiel.',
   'room.startMatch': 'Spiel starten',
@@ -91,6 +98,7 @@ export const de: Record<TranslationKey, string> = {
   'game.stillIn': 'noch {count} dabei',
   'game.youWin': 'Du gewinnst!',
   'game.winner': 'Sieger',
+  'game.teamWins': '{team} gewinnt!',
   'game.noOne': 'Niemand',
   'game.backToLobby': 'Zurück zur Lobby in {seconds}…',
 };

@@ -3,6 +3,7 @@ import { MusicNotes } from './MusicNotes';
 import { useI18n } from '../i18n/I18nContext';
 import { haptics } from '../lib/haptics';
 import { sfx } from '../lib/sfx';
+import { teamById, type TeamId } from '../lib/teams';
 import type { useShakeDetector } from '../hooks/useShakeDetector';
 
 export type Phase = 'lobby' | 'ready' | 'jousting' | 'winner';
@@ -13,6 +14,7 @@ export type Player = {
   ready: boolean;
   eliminated: boolean;
   away: boolean;
+  team: TeamId | null;
 };
 
 const REACTION_EMOJI: Record<Reaction, string> = {
@@ -29,6 +31,7 @@ type GameProps = {
   readyEndsAt: number | null;
   winnerEndsAt: number | null;
   winnerId: string | null;
+  winnerTeam: TeamId | null;
   detector: ReturnType<typeof useShakeDetector>;
   lastReaction: { reaction: Reaction; at: number } | null;
   onEliminate: () => void;
@@ -165,6 +168,7 @@ function WinnerView({
   players,
   myId,
   winnerId,
+  winnerTeam,
   winnerEndsAt,
   lastReaction,
   onReaction,
@@ -172,8 +176,13 @@ function WinnerView({
   lobbySheet,
 }: GameProps) {
   const { t } = useI18n();
+  const me = players.find((p) => p.id === myId);
   const winner = players.find((p) => p.id === winnerId);
-  const iWon = winnerId !== null && winnerId === myId;
+  const winningTeam = teamById(winnerTeam);
+  // A team victory counts for everyone on it; otherwise only the lone survivor.
+  const iWon = winnerTeam
+    ? me?.team === winnerTeam
+    : winnerId !== null && winnerId === myId;
 
   const [secondsLeft, setSecondsLeft] = useState(() =>
     winnerEndsAt ? Math.max(0, Math.ceil((winnerEndsAt - Date.now()) / 1000)) : 0,
@@ -192,9 +201,18 @@ function WinnerView({
       <div className="text-sm font-semibold uppercase tracking-[0.3em] text-ochre">
         {t(iWon ? 'game.youWin' : 'game.winner')}
       </div>
-      <div className="font-serif text-5xl font-bold tracking-tight text-center px-6">
-        {winner?.name ?? t('game.noOne')}
-      </div>
+      {winningTeam ? (
+        <div
+          className="font-serif text-5xl font-bold tracking-tight text-center px-6"
+          style={{ color: winningTeam.color }}
+        >
+          {t('game.teamWins', { team: winningTeam.label })}
+        </div>
+      ) : (
+        <div className="font-serif text-5xl font-bold tracking-tight text-center px-6">
+          {winner?.name ?? t('game.noOne')}
+        </div>
+      )}
     </div>
   );
 

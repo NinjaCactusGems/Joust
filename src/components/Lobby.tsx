@@ -4,6 +4,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { generateRoomCode, normalizeRoomCode } from '../lib/roomCode';
 import { generateRandomName } from '../lib/names';
 import { Game, type Phase, type Reaction } from './Game';
+import { TEAMS, teamById, type TeamId } from '../lib/teams';
 import { useShakeDetector } from '../hooks/useShakeDetector';
 import { useMatchMusic } from '../hooks/useMatchMusic';
 import { useServerClock } from '../hooks/useServerClock';
@@ -19,12 +20,17 @@ const PLAYER_NAME_KEY = 'joust:playerName';
 // shifts move it to Sensitive (slow) or Forgiving (fast) mid-round.
 const JOUST_THRESHOLD = TEMPO_THRESHOLD.normal;
 
+// Teams unlock at 3+ players (below that it's a free-for-all). Kept in sync with
+// the server's MIN_PLAYERS_FOR_TEAMS.
+const MIN_PLAYERS_FOR_TEAMS = 3;
+
 type Player = {
   id: string;
   name: string;
   ready: boolean;
   eliminated: boolean;
   away: boolean;
+  team: TeamId | null;
 };
 
 type LobbyState =
@@ -139,11 +145,15 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
   const [readyEndsAt, setReadyEndsAt] = useState<number | null>(null);
   const [winnerEndsAt, setWinnerEndsAt] = useState<number | null>(null);
   const [winnerId, setWinnerId] = useState<string | null>(null);
+  const [winnerTeam, setWinnerTeam] = useState<TeamId | null>(null);
   const [tempo, setTempo] = useState<Tempo>('normal');
   const [tempoEffectiveAt, setTempoEffectiveAt] = useState<number | null>(null);
   // The winner we keep showing once the server returns to the lobby, so the
   // lobby can slide in beneath the celebration. Cleared when a new round starts.
   const [postGameWinnerId, setPostGameWinnerId] = useState<string | null>(null);
+  const [postGameWinnerTeam, setPostGameWinnerTeam] = useState<TeamId | null>(
+    null,
+  );
   const [lastReaction, setLastReaction] = useState<{
     reaction: Reaction;
     at: number;
@@ -179,6 +189,7 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
           readyEndsAt: number | null;
           winnerEndsAt: number | null;
           winnerId: string | null;
+          winnerTeam: TeamId | null;
           tempo: Tempo;
           tempoEffectiveAt: number | null;
           players: Player[];
@@ -190,6 +201,7 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
           setReadyEndsAt(data.readyEndsAt ?? null);
           setWinnerEndsAt(data.winnerEndsAt ?? null);
           setWinnerId(data.winnerId ?? null);
+          setWinnerTeam(data.winnerTeam ?? null);
           setTempo(data.tempo ?? 'normal');
           setTempoEffectiveAt(data.tempoEffectiveAt ?? null);
           setPlayers(Array.isArray(data.players) ? data.players : []);
@@ -197,8 +209,13 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
           // new round (ready/jousting) clears it.
           if (nextPhase === 'ready' || nextPhase === 'jousting') {
             setPostGameWinnerId(null);
-          } else if (nextPhase === 'winner' && data.winnerId) {
-            setPostGameWinnerId(data.winnerId);
+            setPostGameWinnerTeam(null);
+          } else if (
+            nextPhase === 'winner' &&
+            (data.winnerId || data.winnerTeam)
+          ) {
+            setPostGameWinnerId(data.winnerId ?? null);
+            setPostGameWinnerTeam(data.winnerTeam ?? null);
           }
         } else if (data.type === 'reaction' && data.reaction) {
           setLastReaction({ reaction: data.reaction, at: Date.now() });
@@ -263,6 +280,17 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
   const activePlayers = players.filter((p) => !p.away);
   const allReady = activePlayers.length > 0 && activePlayers.every((p) => p.ready);
 
+  // Teams unlock at 3+ active players. Below that, everyone is their own side.
+  const teamsActive = activePlayers.length >= MIN_PLAYERS_FOR_TEAMS;
+  // Mirror the server gate: need ≥2 distinct sides to start (a lone player is
+  // exempt — Johann fills in). Blocks the "everyone on one team" start.
+  const factions = new Set(
+    activePlayers.map((p) =>
+      teamsActive && p.team ? `team:${p.team}` : `solo:${p.id}`,
+    ),
+  );
+  const canStartTeams = activePlayers.length <= 1 || factions.size >= 2;
+
   const shareUrl =
     typeof window !== 'undefined'
       ? `${window.location.origin}/?room=${code}`
@@ -315,6 +343,7 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
         readyEndsAt={readyEndsAt}
         winnerEndsAt={winnerEndsAt}
         winnerId={winnerId}
+        winnerTeam={winnerTeam}
         detector={detector}
         lastReaction={lastReaction}
         onEliminate={() => send({ type: 'eliminate' })}
@@ -361,6 +390,7 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
           <ul className="flex flex-col gap-1.5">
             {players.map((p) => {
               const isMe = p.id === myId;
+              const team = teamById(p.team);
               return (
                 <li
                   key={p.id}
@@ -411,6 +441,14 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
                       <span className="min-w-0 flex-1 truncate text-ink">
                         {p.name}
                       </span>
+                      {team && (
+                        <span
+                          className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-paper"
+                          style={{ backgroundColor: team.color }}
+                        >
+                          {team.label}
+                        </span>
+                      )}
                       {p.away && (
                         <span className="shrink-0 rounded-full bg-line px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-ink-muted">
                           {t('room.away')}
@@ -439,6 +477,31 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
         )}
       </div>
 
+      {players.length >= MIN_PLAYERS_FOR_TEAMS && (
+        <label className="flex flex-col gap-1.5">
+          <span className="text-xs uppercase tracking-wider text-ink-muted">
+            {t('room.team')}
+          </span>
+          <select
+            value={me?.team ?? ''}
+            onChange={(e) =>
+              send({
+                type: 'setTeam',
+                team: (e.target.value || null) as TeamId | null,
+              })
+            }
+            className="w-full rounded-xl border border-line bg-paper px-4 py-3 text-base text-ink focus:outline-none focus:border-ink-muted"
+          >
+            <option value="">{t('room.teamSolo')}</option>
+            {TEAMS.map((tm) => (
+              <option key={tm.id} value={tm.id}>
+                {tm.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
       <button
         type="button"
         onClick={() => onToggleReady(!(me?.ready ?? false))}
@@ -456,11 +519,17 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
 
       <button
         type="button"
-        disabled={!allReady}
+        disabled={!allReady || !canStartTeams}
         onClick={() => send({ type: 'start' })}
         className="w-full rounded-full bg-go px-6 py-3 text-base font-semibold text-paper shadow-lg shadow-go/20 active:scale-95 transition disabled:bg-line disabled:text-ink-faint disabled:shadow-none"
       >
-        {t(allReady ? 'room.startMatch' : 'room.waitingEveryone')}
+        {t(
+          !allReady
+            ? 'room.waitingEveryone'
+            : !canStartTeams
+              ? 'room.needTeams'
+              : 'room.startMatch',
+        )}
       </button>
 
       <button
@@ -475,7 +544,7 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
 
   // Just won? Keep the winner on screen and slide the lobby up beneath it so
   // players can keep tapping smileys. Otherwise show the plain lobby.
-  if (postGameWinnerId) {
+  if (postGameWinnerId || postGameWinnerTeam) {
     return (
       <Game
         phase="winner"
@@ -484,6 +553,7 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
         readyEndsAt={null}
         winnerEndsAt={null}
         winnerId={postGameWinnerId}
+        winnerTeam={postGameWinnerTeam}
         detector={detector}
         lastReaction={lastReaction}
         onEliminate={() => {}}
