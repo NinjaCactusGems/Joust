@@ -60,7 +60,7 @@ A round runs through four server-owned phases (`party/server.ts`), with the clie
 1. **Lobby** — players join and ready up. Toggling "I'm ready" also requests device-motion permission (iOS needs the request to come from a user gesture).
 2. **Ready** — a 5-second countdown synced via `readyEndsAt`. Small haptic tick each second, a larger buzz on "Go". Neutral staff background.
 3. **Jousting** — a "hold still" nerve game. Each phone watches its own motion at the **Normal/medium** threshold (7 m/s²) via `useShakeDetector(7)`; a spike reports `eliminate` to the server. Your screen is full-screen **olive** while in, **red** ("OUT") once eliminated — readable across a room. Last player standing wins.
-4. **Winner** — shows the survivor's name. Any player can tap a smiley (💩 / ❤️ / 🕺); each tap re-broadcasts a transient `reaction` event that bursts emoji particles on every screen (no counters). After 10 seconds (`winnerEndsAt`) everyone returns to the lobby, un-readied.
+4. **Winner** — shows the survivor's name. Any player can tap a smiley (💩 / ❤️ / 🕺 / 💃); each tap re-broadcasts a transient `reaction` event that floats one emoji particle up every screen (no counters). After 10 seconds (`winnerEndsAt`) the server returns everyone to the lobby un-readied, but the client keeps the winner on screen and slides the lobby panel up from below — so players can keep emoting. Reactions are accepted by the server in both the `winner` and `lobby` phases for this reason. The post-game winner is cleared on the client when the next round starts.
 
 Notes:
 - The server is authoritative for all transitions and timing. Clients only send `eliminate` (self) and `reaction`.

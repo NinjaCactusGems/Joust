@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { MusicNotes } from './MusicNotes';
 import { haptics } from '../lib/haptics';
 import type { useShakeDetector } from '../hooks/useShakeDetector';
 
 export type Phase = 'lobby' | 'ready' | 'jousting' | 'winner';
-export type Reaction = 'turd' | 'heart' | 'dancer';
+export type Reaction = 'turd' | 'heart' | 'dancer' | 'dancerF';
 export type Player = {
   id: string;
   name: string;
@@ -17,6 +17,7 @@ const REACTION_EMOJI: Record<Reaction, string> = {
   turd: '💩',
   heart: '❤️',
   dancer: '🕺',
+  dancerF: '💃',
 };
 
 type GameProps = {
@@ -30,6 +31,11 @@ type GameProps = {
   lastReaction: { reaction: Reaction; at: number } | null;
   onEliminate: () => void;
   onReaction: (reaction: Reaction) => void;
+  // Post-game: the winner stays on screen and the lobby slides up from below
+  // (rendered here) so players can keep emoting. Server phase is 'lobby', but
+  // Room renders Game with phase 'winner' + these props.
+  postGame?: boolean;
+  lobbySheet?: ReactNode;
 };
 
 export function Game(props: GameProps) {
@@ -153,6 +159,8 @@ function WinnerView({
   winnerEndsAt,
   lastReaction,
   onReaction,
+  postGame,
+  lobbySheet,
 }: GameProps) {
   const winner = players.find((p) => p.id === winnerId);
   const iWon = winnerId !== null && winnerId === myId;
@@ -169,35 +177,59 @@ function WinnerView({
     return () => window.clearInterval(id);
   }, [winnerEndsAt]);
 
+  const header = (
+    <div className="relative z-30 flex flex-col items-center gap-2">
+      <div className="text-sm font-semibold uppercase tracking-[0.3em] text-ochre">
+        {iWon ? 'You win!' : 'Winner'}
+      </div>
+      <div className="font-serif text-5xl font-bold tracking-tight text-center px-6">
+        {winner?.name ?? 'No one'}
+      </div>
+    </div>
+  );
+
+  // Reaction bar stays available so the celebration can keep emoting, both on
+  // the winner screen and once the lobby has slid in beneath it.
+  const smileys = (
+    <div className="relative z-30 flex gap-3">
+      {(Object.keys(REACTION_EMOJI) as Reaction[]).map((r) => (
+        <button
+          key={r}
+          type="button"
+          onClick={() => onReaction(r)}
+          className="grid h-16 w-16 place-items-center rounded-2xl border border-line bg-paper-raised text-4xl shadow-sm active:scale-90 transition"
+          aria-label={r}
+        >
+          {REACTION_EMOJI[r]}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (postGame) {
+    return (
+      <div className="fixed inset-0 z-50 flex flex-col overflow-hidden bg-staff text-ink">
+        <ReactionParticles lastReaction={lastReaction} />
+        <div className="flex shrink-0 flex-col items-center gap-4 px-6 pt-10 pb-4">
+          {header}
+          {smileys}
+        </div>
+        <div className="relative z-10 flex min-h-0 flex-1 items-end justify-center px-4 pb-4">
+          <div className="animate-sheet-up max-h-full w-full max-w-sm overflow-y-auto">
+            {lobbySheet}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-8 bg-staff text-ink">
       <ReactionParticles lastReaction={lastReaction} />
-
-      <div className="relative z-10 flex flex-col items-center gap-3">
-        <div className="text-sm font-semibold uppercase tracking-[0.3em] text-ochre">
-          {iWon ? 'You win!' : 'Winner'}
-        </div>
-        <div className="font-serif text-6xl font-bold tracking-tight text-center px-6">
-          {winner?.name ?? 'No one'}
-        </div>
-      </div>
-
-      <div className="relative z-10 flex gap-4">
-        {(Object.keys(REACTION_EMOJI) as Reaction[]).map((r) => (
-          <button
-            key={r}
-            type="button"
-            onClick={() => onReaction(r)}
-            className="grid h-16 w-16 place-items-center rounded-2xl border border-line bg-paper-raised text-4xl shadow-sm active:scale-90 transition"
-            aria-label={r}
-          >
-            {REACTION_EMOJI[r]}
-          </button>
-        ))}
-      </div>
-
+      {header}
+      {smileys}
       {secondsLeft > 0 && (
-        <div className="relative z-10 text-sm text-ink-muted">
+        <div className="relative z-30 text-sm text-ink-muted">
           Back to lobby in {secondsLeft}…
         </div>
       )}
@@ -205,9 +237,9 @@ function WinnerView({
   );
 }
 
-type Particle = { id: number; emoji: string; left: number; delay: number };
+type Particle = { id: number; emoji: string; left: number };
 
-// Spawns a short burst of floating emoji each time a reaction event arrives.
+// Floats a single emoji up the screen for each reaction event (one per tap).
 // Particles self-remove once their animation completes.
 function ReactionParticles({
   lastReaction,
@@ -222,19 +254,16 @@ function ReactionParticles({
   const reaction = lastReaction?.reaction;
   useEffect(() => {
     if (!reaction) return;
-    const emoji = REACTION_EMOJI[reaction];
-    const batch: Particle[] = Array.from({ length: 10 }, () => ({
+    const particle: Particle = {
       id: seqRef.current++,
-      emoji,
+      emoji: REACTION_EMOJI[reaction],
       left: 5 + Math.random() * 90, // vw
-      delay: Math.random() * 0.3, // s
-    }));
-    setParticles((prev) => [...prev, ...batch]);
+    };
+    setParticles((prev) => [...prev, particle]);
 
-    const ids = new Set(batch.map((p) => p.id));
     const timer = window.setTimeout(() => {
-      setParticles((prev) => prev.filter((p) => !ids.has(p.id)));
-    }, 2200);
+      setParticles((prev) => prev.filter((p) => p.id !== particle.id));
+    }, 2000);
     return () => window.clearTimeout(timer);
   }, [at, reaction]);
 
@@ -246,7 +275,7 @@ function ReactionParticles({
         <span
           key={p.id}
           className="animate-reaction-float absolute bottom-0 text-5xl"
-          style={{ left: `${p.left}vw`, animationDelay: `${p.delay}s` }}
+          style={{ left: `${p.left}vw` }}
         >
           {p.emoji}
         </span>

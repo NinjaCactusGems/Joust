@@ -2,7 +2,7 @@ import { Server, routePartykitRequest, type Connection } from 'partyserver';
 
 type Phase = 'lobby' | 'ready' | 'jousting' | 'winner';
 
-type Reaction = 'turd' | 'heart' | 'dancer';
+type Reaction = 'turd' | 'heart' | 'dancer' | 'dancerF';
 
 type Player = {
   id: string;
@@ -42,7 +42,7 @@ const MAX_PLAYERS_PER_ROOM = 16;
 const MAX_NAME_LENGTH = 24;
 const READY_DURATION_MS = 5000;
 const WINNER_DURATION_MS = 10000;
-const REACTIONS: readonly Reaction[] = ['turd', 'heart', 'dancer'];
+const REACTIONS: readonly Reaction[] = ['turd', 'heart', 'dancer', 'dancerF'];
 
 // Reject WS upgrades whose Origin isn't ours, so other sites can't drive
 // our Durable Objects from their users' browsers (cost-shifting). The
@@ -161,7 +161,9 @@ export class Main extends Server {
         break;
       }
       case 'reaction': {
-        if (this.phase !== 'winner') return;
+        // Allowed on the winner screen and afterwards in the lobby, so the
+        // post-game celebration can keep emoting as the lobby slides in.
+        if (this.phase !== 'winner' && this.phase !== 'lobby') return;
         if (!REACTIONS.includes(msg.reaction)) return;
         // Fire-and-forget: re-broadcast so every client bursts the same emoji.
         const event: ReactionEvent = { type: 'reaction', reaction: msg.reaction };

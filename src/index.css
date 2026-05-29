@@ -40,6 +40,19 @@
   .animate-reaction-float {
     animation: reaction-float 1.8s ease-out forwards;
   }
+
+  /* Post-game: the lobby panel slides up from below the winner screen. */
+  @keyframes sheet-up {
+    from {
+      transform: translateY(100%);
+    }
+    to {
+      transform: translateY(0);
+    }
+  }
+  .animate-sheet-up {
+    animation: sheet-up 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
 }
 
 @layer components {

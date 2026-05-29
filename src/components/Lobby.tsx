@@ -135,6 +135,9 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
   const [readyEndsAt, setReadyEndsAt] = useState<number | null>(null);
   const [winnerEndsAt, setWinnerEndsAt] = useState<number | null>(null);
   const [winnerId, setWinnerId] = useState<string | null>(null);
+  // The winner we keep showing once the server returns to the lobby, so the
+  // lobby can slide in beneath the celebration. Cleared when a new round starts.
+  const [postGameWinnerId, setPostGameWinnerId] = useState<string | null>(null);
   const [lastReaction, setLastReaction] = useState<{
     reaction: Reaction;
     at: number;
@@ -174,11 +177,19 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
           reaction: Reaction;
         }>;
         if (data.type === 'state') {
-          setPhase(data.phase ?? 'lobby');
+          const nextPhase = data.phase ?? 'lobby';
+          setPhase(nextPhase);
           setReadyEndsAt(data.readyEndsAt ?? null);
           setWinnerEndsAt(data.winnerEndsAt ?? null);
           setWinnerId(data.winnerId ?? null);
           setPlayers(Array.isArray(data.players) ? data.players : []);
+          // Remember the winner so the post-game lobby can keep showing it; a
+          // new round (ready/jousting) clears it.
+          if (nextPhase === 'ready' || nextPhase === 'jousting') {
+            setPostGameWinnerId(null);
+          } else if (nextPhase === 'winner' && data.winnerId) {
+            setPostGameWinnerId(data.winnerId);
+          }
         } else if (data.type === 'reaction' && data.reaction) {
           setLastReaction({ reaction: data.reaction, at: Date.now() });
         }
@@ -280,7 +291,7 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
     );
   }
 
-  return (
+  const lobbyPanel = (
     <div className="w-full max-w-sm rounded-2xl border border-line bg-paper-raised/80 p-5 flex flex-col gap-4">
       <div className="flex items-baseline justify-between">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-muted">
@@ -426,6 +437,29 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
       </button>
     </div>
   );
+
+  // Just won? Keep the winner on screen and slide the lobby up beneath it so
+  // players can keep tapping smileys. Otherwise show the plain lobby.
+  if (postGameWinnerId) {
+    return (
+      <Game
+        phase="winner"
+        players={players}
+        myId={myId}
+        readyEndsAt={null}
+        winnerEndsAt={null}
+        winnerId={postGameWinnerId}
+        detector={detector}
+        lastReaction={lastReaction}
+        onEliminate={() => {}}
+        onReaction={(reaction) => send({ type: 'reaction', reaction })}
+        postGame
+        lobbySheet={lobbyPanel}
+      />
+    );
+  }
+
+  return lobbyPanel;
 }
 
 function StatusBadge({ status }: { status: 'connecting' | 'open' | 'closed' }) {
