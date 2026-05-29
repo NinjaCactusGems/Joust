@@ -54,6 +54,12 @@ const READY_DURATION_MS = 5000;
 const WINNER_DURATION_MS = 10000;
 const REACTIONS: readonly Reaction[] = ['turd', 'heart', 'dancer', 'dancerF'];
 
+// When you start a round alone, Johann joins as a virtual opponent so the solo
+// nerve game isn't an instant win. He never moves, so he's never eliminated and
+// wins the moment the lone human twitches out.
+const BOT_NAME = 'Johann';
+const BOT_ID = 'bot-johann'; // never collides with UUID connection ids
+
 // Each tempo phase holds 10–15s; changes are announced this far ahead so every
 // client receives them before the synced flip.
 const TEMPO_HOLD_MIN_MS = 10000;
@@ -99,6 +105,9 @@ export class Main extends Server {
   private tempo: Tempo = 'normal';
   private tempoEffectiveAt: number | null = null;
   private tempoTimer: ReturnType<typeof setTimeout> | null = null;
+  // Set when a lone player starts a round: Johann joins as a virtual player for
+  // that round only. Cleared back to lobby on reset. See BOT_NAME above.
+  private botActive = false;
   // Per-connection state, keyed by connection id.
   private playerState = new Map<
     string,
@@ -225,7 +234,7 @@ export class Main extends Server {
   }
 
   private currentPlayers(): Player[] {
-    return [...this.getConnections()].map((c: Connection) => {
+    const players = [...this.getConnections()].map((c: Connection) => {
       const entry = this.ensurePlayer(c.id);
       return {
         id: c.id,
@@ -235,6 +244,16 @@ export class Main extends Server {
         away: !entry.visible,
       };
     });
+    if (this.botActive) {
+      players.push({
+        id: BOT_ID,
+        name: BOT_NAME,
+        ready: true,
+        eliminated: false, // Johann never moves → never out → always wins
+        away: false,
+      });
+    }
+    return players;
   }
 
   // Clears any pending phase timer before scheduling the next, so transitions
@@ -251,6 +270,10 @@ export class Main extends Server {
     // the next lobby cycle when they come back.
     const active = this.currentPlayers().filter((p) => !p.away);
     if (active.length === 0 || !active.every((p) => p.ready)) return;
+
+    // Lone starter? Johann joins so they actually have to win it. (botActive is
+    // still false here, so `active` counts only human connections.)
+    this.botActive = active.length === 1;
 
     for (const entry of this.playerState.values()) {
       // Away players start the round already eliminated — they don't get
@@ -339,6 +362,7 @@ export class Main extends Server {
     this.readyEndsAt = null;
     this.winnerEndsAt = null;
     this.winnerId = null;
+    this.botActive = false;
     // Everyone returns to the lobby un-readied and back in the game.
     for (const entry of this.playerState.values()) {
       entry.ready = false;
