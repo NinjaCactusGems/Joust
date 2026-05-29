@@ -36,9 +36,10 @@ function fade(
  * Plays the match soundtrack, looping.
  *
  * Playback begins exactly when the "Get Ready" countdown hits zero — i.e. at
- * `readyEndsAt` (the moment jousting starts / "GO"). Each client schedules the
- * start against its own clock, so the music drops in step with the countdown
- * the player sees, and stays in step across devices to within their clock skew.
+ * `readyEndsAt`, the server-authoritative moment jousting starts / "GO". The
+ * server broadcasts that timestamp ~5s ahead of time; `toLocalTime` (from
+ * useServerClock) converts it into this client's clock so every device in the
+ * room starts at the same real instant, irrespective of clock skew.
  *
  * The track keeps looping through the round, the winner screen, and the lobby
  * so there is no gap between rounds; each new round re-seeks it to the start at
@@ -47,7 +48,11 @@ function fade(
  * Eliminated players hear nothing: the soundtrack fades to silent while
  * `eliminated` is true and fades back when they re-enter the next round.
  */
-export function useMatchMusic(readyEndsAt: number | null, eliminated: boolean) {
+export function useMatchMusic(
+  readyEndsAt: number | null,
+  eliminated: boolean,
+  toLocalTime: (serverTs: number) => number,
+) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const cancelFadeRef = useRef<(() => void) | null>(null);
   const startTimerRef = useRef<number | null>(null);
@@ -131,7 +136,9 @@ export function useMatchMusic(readyEndsAt: number | null, eliminated: boolean) {
     };
 
     if (startTimerRef.current) window.clearTimeout(startTimerRef.current);
-    const delay = Math.max(0, readyEndsAt - Date.now());
+    // readyEndsAt is in server time; convert to this client's clock so all
+    // devices fire at the same real instant.
+    const delay = Math.max(0, toLocalTime(readyEndsAt) - Date.now());
     startTimerRef.current = window.setTimeout(begin, delay);
 
     return () => {
@@ -140,7 +147,7 @@ export function useMatchMusic(readyEndsAt: number | null, eliminated: boolean) {
         startTimerRef.current = null;
       }
     };
-  }, [readyEndsAt]);
+  }, [readyEndsAt, toLocalTime]);
 
   // Mute the soundtrack for eliminated players; restore when back in the round.
   useEffect(() => {

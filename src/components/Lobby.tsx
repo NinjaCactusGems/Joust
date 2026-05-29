@@ -6,6 +6,7 @@ import { generateRandomName } from '../lib/names';
 import { Game, type Phase, type Reaction } from './Game';
 import { useShakeDetector } from '../hooks/useShakeDetector';
 import { useMatchMusic } from '../hooks/useMatchMusic';
+import { useServerClock } from '../hooks/useServerClock';
 
 const PARTY_HOST = import.meta.env.VITE_PARTY_HOST || 'localhost:1999';
 
@@ -223,10 +224,16 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
     return () => document.removeEventListener('visibilitychange', onChange);
   }, [status, socket]);
 
+  // Server clock sync: converts server timestamps to local time so every device
+  // in the room acts in lockstep (and a foundation for future server-driven
+  // sync like changing the track tempo for everyone at once).
+  const { toLocalTime } = useServerClock(socket, status === 'open');
+
   // Looping match soundtrack: starts when the "Get Ready" countdown hits zero
-  // (readyEndsAt), and goes silent for this player while they're eliminated.
+  // (readyEndsAt) — in lockstep across devices via the server clock — and goes
+  // silent for this player while they're eliminated.
   const me = players.find((p) => p.id === myId);
-  useMatchMusic(readyEndsAt, Boolean(me?.eliminated));
+  useMatchMusic(readyEndsAt, Boolean(me?.eliminated), toLocalTime);
 
   const send = (msg: unknown) => {
     if (status === 'open') socket.send(JSON.stringify(msg));

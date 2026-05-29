@@ -36,7 +36,8 @@ type ClientMessage =
   | { type: 'visibility'; visible: boolean }
   | { type: 'start' }
   | { type: 'eliminate' }
-  | { type: 'reaction'; reaction: Reaction };
+  | { type: 'reaction'; reaction: Reaction }
+  | { type: 'ping'; t: number };
 
 const MAX_PLAYERS_PER_ROOM = 16;
 const MAX_NAME_LENGTH = 24;
@@ -168,6 +169,17 @@ export class Main extends Server {
         // Fire-and-forget: re-broadcast so every client bursts the same emoji.
         const event: ReactionEvent = { type: 'reaction', reaction: msg.reaction };
         this.broadcast(JSON.stringify(event));
+        break;
+      }
+      case 'ping': {
+        // Clock sync: echo the client's send time plus our own clock, so the
+        // client can estimate round-trip time and its offset from server time
+        // (Cristian's algorithm) and schedule synced events like match start.
+        if (typeof msg.t === 'number') {
+          connection.send(
+            JSON.stringify({ type: 'pong', t: msg.t, serverTime: Date.now() }),
+          );
+        }
         break;
       }
     }
