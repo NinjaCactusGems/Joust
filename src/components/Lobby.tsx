@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import usePartySocket from 'partysocket/react';
 import { QRCodeSVG } from 'qrcode.react';
 import { generateRoomCode, normalizeRoomCode } from '../lib/roomCode';
 import { generateRandomName } from '../lib/names';
 import { Game, type Phase, type Reaction } from './Game';
 import { useShakeDetector } from '../hooks/useShakeDetector';
+import { useMatchMusic } from '../hooks/useMatchMusic';
 
 const PARTY_HOST = import.meta.env.VITE_PARTY_HOST || 'localhost:1999';
 
@@ -41,6 +42,19 @@ function getPlayerName(): string {
     window.localStorage.setItem(PLAYER_NAME_KEY, name);
   }
   return name;
+}
+
+// One-way latency (seconds) estimated as half the median recent round-trip.
+// The median rejects the occasional jittery sample without chasing spikes.
+function medianHalfRttSec(samples: number[]): number {
+  if (samples.length === 0) return 0;
+  const sorted = [...samples].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const rtt =
+    sorted.length % 2
+      ? sorted[mid]
+      : (sorted[mid - 1] + sorted[mid]) / 2;
+  return rtt / 2 / 1000;
 }
 
 export function Lobby() {
@@ -154,6 +168,9 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
   // Game overlay reads lastShakeAt from this to detect "moved too fast".
   const detector = useShakeDetector(JOUST_THRESHOLD);
 
+  // Recent round-trip samples (ms), used to synchronise the match soundtrack.
+  const rttSamplesRef = useRef<number[]>([]);
+
   const socket = usePartySocket({
     host: PARTY_HOST,
     party: 'main',
@@ -175,6 +192,7 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
           winnerId: string | null;
           players: Player[];
           reaction: Reaction;
+          t: number;
         }>;
         if (data.type === 'state') {
           const nextPhase = data.phase ?? 'lobby';
@@ -192,6 +210,13 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
           }
         } else if (data.type === 'reaction' && data.reaction) {
           setLastReaction({ reaction: data.reaction, at: Date.now() });
+        } else if (data.type === 'pong' && typeof data.t === 'number') {
+          const rtt = Date.now() - data.t;
+          if (rtt >= 0 && rtt < 10000) {
+            const arr = rttSamplesRef.current;
+            arr.push(rtt);
+            if (arr.length > 8) arr.shift();
+          }
         }
       } catch {
         // ignore non-JSON frames
@@ -221,6 +246,30 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
     document.addEventListener('visibilitychange', onChange);
     return () => document.removeEventListener('visibilitychange', onChange);
   }, [status, socket]);
+
+  // Probe round-trip time: a quick burst on connect, then a periodic ping.
+  useEffect(() => {
+    if (status !== 'open') return;
+    const ping = () => socket.send(JSON.stringify({ type: 'ping', t: Date.now() }));
+    ping();
+    const t1 = window.setTimeout(ping, 250);
+    const t2 = window.setTimeout(ping, 600);
+    const id = window.setInterval(ping, 4000);
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+      window.clearInterval(id);
+    };
+  }, [status, socket]);
+
+  // Synchronised, looping match soundtrack. A new round begins with the
+  // "Get Ready" countdown (readyEndsAt); offset playback by the one-way
+  // latency so every client lands on the same position when it starts.
+  const getOffsetSec = useCallback(
+    () => medianHalfRttSec(rttSamplesRef.current),
+    [],
+  );
+  useMatchMusic(readyEndsAt, getOffsetSec);
 
   const send = (msg: unknown) => {
     if (status === 'open') socket.send(JSON.stringify(msg));
