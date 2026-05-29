@@ -56,7 +56,7 @@ export const sfx = {
     // 1) Sharp click/pop transient — the physical plug-pull "thunk".
     const click = ac.createOscillator();
     click.type = 'square';
-    click.frequency.setValueAtTime(1800, now);
+    click.frequency.setValueAtTime(900, now);
     const clickGain = ac.createGain();
     clickGain.gain.setValueAtTime(0.9, now);
     clickGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.012);
@@ -64,29 +64,31 @@ export const sfx = {
     click.start(now);
     click.stop(now + 0.02);
 
-    // 2) Low body thump (kept round — bypasses the clipper).
+    // 2) Low body thump (kept round — bypasses the clipper). The dominant
+    // layer, so the screech reads as a deep "thunk" rather than a high cry.
     const thump = ac.createOscillator();
     thump.type = 'sine';
-    thump.frequency.setValueAtTime(150, now);
-    thump.frequency.exponentialRampToValueAtTime(40, now + 0.12);
+    thump.frequency.setValueAtTime(140, now);
+    thump.frequency.exponentialRampToValueAtTime(38, now + 0.14);
     const thumpGain = ac.createGain();
     thumpGain.gain.setValueAtTime(0.0001, now);
-    thumpGain.gain.exponentialRampToValueAtTime(0.9, now + 0.005);
-    thumpGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+    thumpGain.gain.exponentialRampToValueAtTime(1.0, now + 0.005);
+    thumpGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
     thump.connect(thumpGain).connect(master);
     thump.start(now);
-    thump.stop(now + 0.18);
+    thump.stop(now + 0.22);
 
     // 3) Feedback squeal that abruptly cuts to silence (gated), not decays.
+    // Pitched well down from a true squeal so it growls rather than shrieks.
     const squealDur = 0.11;
     const squeal = ac.createOscillator();
     squeal.type = 'sawtooth';
-    squeal.frequency.setValueAtTime(3200, now);
-    squeal.frequency.linearRampToValueAtTime(3850, now + squealDur);
+    squeal.frequency.setValueAtTime(1000, now);
+    squeal.frequency.linearRampToValueAtTime(1300, now + squealDur);
     const squealGain = ac.createGain();
     squealGain.gain.setValueAtTime(0.0001, now);
-    squealGain.gain.exponentialRampToValueAtTime(0.5, now + 0.01);
-    squealGain.gain.setValueAtTime(0.5, now + squealDur - 0.001); // hold full…
+    squealGain.gain.exponentialRampToValueAtTime(0.45, now + 0.01);
+    squealGain.gain.setValueAtTime(0.45, now + squealDur - 0.001); // hold full…
     squealGain.gain.setValueAtTime(0.0001, now + squealDur); // …then hard cut
     squeal.connect(squealGain).connect(shaper);
     squeal.start(now);
@@ -101,7 +103,7 @@ export const sfx = {
     noise.buffer = noiseBuf;
     const hp = ac.createBiquadFilter();
     hp.type = 'highpass';
-    hp.frequency.value = 1200;
+    hp.frequency.value = 500;
     const noiseGain = ac.createGain();
     noiseGain.gain.setValueAtTime(0.5, now);
     noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + noiseDur);

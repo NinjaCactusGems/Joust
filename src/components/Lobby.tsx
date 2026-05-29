@@ -441,7 +441,7 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
           me?.ready ? 'bg-go shadow-go/25' : 'bg-eliminated shadow-eliminated/25'
         }`}
       >
-        {me?.ready ? 'Ready ✓' : "I'm ready"}
+        {me?.ready ? 'Ready ✓' : 'Ready?'}
       </button>
 
       {(detector.permissionState === 'denied' ||
