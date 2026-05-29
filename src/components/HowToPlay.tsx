@@ -170,15 +170,19 @@ function NoteHead({
   dir: 1 | -1;
 }) {
   const stemX = cx + dir * (r - 0.5); // rises from the side of the knob
-  const stemTop = cy - 2 * r; // where the hair tuft peaks
+  const stemTop = cy - 2 * r - 0.8; // where the hair tuft peaks
   const s = r / 5; // scale the flag to the head size
+  // The flag is a filled swirl, slightly thicker where it meets the stem and
+  // tapering to a point — a lock of hair trailing toward the figure's back.
+  const flag =
+    `M${stemX} ${stemTop} ` +
+    `C${stemX + dir * 7 * s} ${stemTop + 0.6 * s} ${stemX + dir * 8.5 * s} ${stemTop + 5 * s} ${stemX + dir * 4.5 * s} ${stemTop + 9.5 * s} ` +
+    `C${stemX + dir * 5.5 * s} ${stemTop + 6.5 * s} ${stemX + dir * 2 * s} ${stemTop + 4.5 * s} ${stemX} ${stemTop + 2.6 * s} Z`;
   return (
     <>
       <circle cx={cx} cy={cy} r={r} fill="currentColor" stroke="none" />
       <line x1={stemX} y1={cy} x2={stemX} y2={stemTop} />
-      <path
-        d={`M${stemX} ${stemTop} c ${dir * 6 * s} ${s} ${dir * 8 * s} ${5 * s} ${dir * 4 * s} ${10 * s}`}
-      />
+      <path d={flag} fill="currentColor" stroke="none" />
     </>
   );
 }
