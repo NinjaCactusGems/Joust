@@ -11,6 +11,7 @@ import { useServerClock } from '../hooks/useServerClock';
 import { useSyncedTempo } from '../hooks/useSyncedTempo';
 import { useWakeLock } from '../hooks/useWakeLock';
 import { TEMPO_THRESHOLD, type Tempo } from '../lib/tempo';
+import { sfx } from '../lib/sfx';
 import { useI18n } from '../i18n/I18nContext';
 
 const PARTY_HOST = import.meta.env.VITE_PARTY_HOST || 'localhost:1999';
@@ -20,6 +21,12 @@ const PLAYER_NAME_KEY = 'joust:playerName';
 // Jousting starts at the Normal/medium threshold (7 m/s², per CLAUDE.md); tempo
 // shifts move it to Sensitive (slow) or Forgiving (fast) mid-round.
 const JOUST_THRESHOLD = TEMPO_THRESHOLD.normal;
+
+// After a win the server returns to the lobby, but we keep the celebration
+// (soundtrack + applause) going this much longer so it rides through the
+// transition and ends as the post-game lobby panel fades in, rather than
+// cutting the moment it appears.
+const POSTGAME_HOLD_MS = 1000;
 
 // Teams unlock at 3+ players (below that it's a free-for-all). Kept in sync with
 // the server's MIN_PLAYERS_FOR_TEAMS.
@@ -259,19 +266,54 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
   // sync like changing the track tempo for everyone at once).
   const { toLocalTime } = useServerClock(socket, status === 'open');
 
+  const me = players.find((p) => p.id === myId);
+
+  // Whether the match soundtrack should be running. Live through any non-lobby
+  // phase; once the server returns to the lobby it keeps going for a short beat
+  // if we're celebrating a win (post-game), so the music carries the transition
+  // and fades out as the lobby panel fades in — then stops, so it never plays
+  // before the next match starts.
+  const [musicActive, setMusicActive] = useState(false);
+  useEffect(() => {
+    if (phase !== 'lobby') {
+      setMusicActive(true);
+      return;
+    }
+    if (!postGameWinnerId && !postGameWinnerTeam) {
+      setMusicActive(false);
+      return;
+    }
+    const id = window.setTimeout(() => setMusicActive(false), POSTGAME_HOLD_MS);
+    return () => window.clearTimeout(id);
+  }, [phase, postGameWinnerId, postGameWinnerTeam]);
+
+  // Whether to keep applauding. Active for the whole winner phase, then held a
+  // beat into the post-game so the claps endure until the lobby panel has faded
+  // in — mirroring the music. (Distinct from musicActive, which also covers
+  // ready/jousting, where we don't clap.)
+  const [celebrating, setCelebrating] = useState(false);
+  useEffect(() => {
+    if (phase === 'winner') {
+      setCelebrating(true);
+      return;
+    }
+    if (phase === 'lobby' && (postGameWinnerId || postGameWinnerTeam)) {
+      const id = window.setTimeout(() => setCelebrating(false), POSTGAME_HOLD_MS);
+      return () => window.clearTimeout(id);
+    }
+    setCelebrating(false);
+  }, [phase, postGameWinnerId, postGameWinnerTeam]);
+
   // Looping match soundtrack: starts when the "Get Ready" countdown hits zero
   // (readyEndsAt) — in lockstep across devices via the server clock — shifts
-  // tempo with the room, and goes silent for this player while eliminated. It
-  // only runs while a round is live (any non-lobby phase); back in the lobby it
-  // fades out so it never plays before the next match starts.
-  const me = players.find((p) => p.id === myId);
+  // tempo with the room, and goes silent for this player while eliminated.
   useMatchMusic(
     readyEndsAt,
     Boolean(me?.eliminated),
     toLocalTime,
     tempo,
     tempoEffectiveAt,
-    phase !== 'lobby',
+    musicActive,
   );
 
   // Match the shake sensitivity to the tempo, in lockstep with the music:
@@ -279,6 +321,32 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
   useSyncedTempo(tempo, tempoEffectiveAt, toLocalTime, (next) =>
     detector.setThreshold(TEMPO_THRESHOLD[next]),
   );
+
+  // When a winner is crowned, the losers' phones applaud — each phone claps in
+  // its own enduring, randomly-timed pattern, so one phone reads as a single
+  // person and a roomful blends into a steady crowd. It runs the whole winner
+  // phase and a beat into the post-game (via `celebrating`), ending as the lobby
+  // panel fades in. The winner's own phone stays quiet. The live winner fields
+  // go null once the server resets to the lobby, so fall back to the post-game
+  // copies to keep clapping through the transition.
+  const myTeam = me?.team ?? null;
+  const effWinnerId = winnerId ?? postGameWinnerId;
+  const effWinnerTeam = winnerTeam ?? postGameWinnerTeam;
+  useEffect(() => {
+    if (!celebrating) return;
+    if (effWinnerId === null && effWinnerTeam === null) return;
+    const iWon = effWinnerTeam
+      ? myTeam === effWinnerTeam
+      : effWinnerId === myId;
+    if (iWon) return;
+    let timer = 0;
+    const loop = () => {
+      sfx.clap();
+      timer = window.setTimeout(loop, 160 + Math.random() * 360); // 160–520 ms
+    };
+    loop();
+    return () => window.clearTimeout(timer);
+  }, [celebrating, effWinnerId, effWinnerTeam, myId, myTeam]);
 
   const send = (msg: unknown) => {
     if (status === 'open') socket.send(JSON.stringify(msg));
@@ -354,6 +422,7 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
         winnerTeam={winnerTeam}
         detector={detector}
         lastReaction={lastReaction}
+        toLocalTime={toLocalTime}
         onEliminate={() => send({ type: 'eliminate' })}
         onReaction={(reaction) => send({ type: 'reaction', reaction })}
       />
@@ -564,6 +633,7 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
         winnerTeam={postGameWinnerTeam}
         detector={detector}
         lastReaction={lastReaction}
+        toLocalTime={toLocalTime}
         onEliminate={() => {}}
         onReaction={(reaction) => send({ type: 'reaction', reaction })}
         postGame

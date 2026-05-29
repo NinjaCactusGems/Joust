@@ -30,7 +30,41 @@ const REACTION_NOTES: Record<
   dancerF: { type: 'sine', freqs: [587, 740, 988], step: 0.06, dur: 0.1, gain: 0.22 }, // brighter arpeggio up
 };
 
+// A single hand-clap: a tiny noise burst shaped by a band-pass and a snappy
+// envelope. Pitch and timing are jittered so repeated claps don't sound robotic.
+function clapAt(ac: AudioContext, t0: number, gain: number) {
+  const dur = 0.028;
+  const buf = ac.createBuffer(1, Math.ceil(ac.sampleRate * dur), ac.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) {
+    // Fade the noise across the burst so it cracks rather than ticks.
+    d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
+  }
+  const src = ac.createBufferSource();
+  src.buffer = buf;
+  const bp = ac.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = 1100 + Math.random() * 1100; // 1.1–2.2 kHz
+  bp.Q.value = 0.8;
+  const g = ac.createGain();
+  g.gain.setValueAtTime(gain, t0);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  src.connect(bp).connect(g).connect(ac.destination);
+  src.start(t0);
+  src.stop(t0 + dur + 0.01);
+}
+
 export const sfx = {
+  // A single hand-clap from THIS device. The winner screen drives these in an
+  // enduring, randomly-timed pattern on every losing phone for the length of the
+  // celebration, so one phone reads as a single person clapping and a roomful of
+  // phones blends into a steady crowd (the winner's own phone stays quiet).
+  clap() {
+    const ac = getCtx();
+    if (!ac) return;
+    clapAt(ac, ac.currentTime + Math.random() * 0.02, 0.3 + Math.random() * 0.3);
+  },
+
   // The moment you're eliminated: a microphone yanked from the jack. Layers a
   // sharp click (the plug pull), a deep body thump with a sub-bass drop, a
   // feedback growl that is hard-gated to silence mid-cry (rather than decaying),

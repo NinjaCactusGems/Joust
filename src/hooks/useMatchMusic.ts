@@ -64,11 +64,12 @@ function fade(
  * useServerClock) converts it into this client's clock so every device in the
  * room starts at the same real instant, irrespective of clock skew.
  *
- * The track keeps looping through the round and the winner screen. It stops
- * (fades out) the moment the room returns to the lobby — including the post-game
- * lobby that slides up under the winner — so the soundtrack never bleeds into the
- * lobby between rounds. Each new round re-seeks it to the start at "GO" to
- * re-sync. It also fades out when the room is left (unmount).
+ * The track keeps looping through the round and the winner screen. It fades out
+ * whenever `active` goes false — the caller holds that true through the post-game
+ * celebration and drops it as the lobby panel fades back in — so the soundtrack
+ * carries the transition but never bleeds into the lobby before the next match.
+ * Each new round re-seeks it to the start at "GO" to re-sync. It also fades out
+ * when the room is left (unmount).
  *
  * Eliminated players hear nothing: the soundtrack fades to silent while
  * `eliminated` is true and fades back when they re-enter the next round.
@@ -195,10 +196,10 @@ export function useMatchMusic(
     };
   }, [readyEndsAt, toLocalTime]);
 
-  // Back in the lobby (active=false) — including the post-game lobby that slides
-  // up under the winner — stop the soundtrack so it doesn't keep looping for the
-  // last survivor (whose track was never silenced by elimination) while everyone
-  // waits to start again. The next round's GO restart brings it back.
+  // active=false — the room has settled back into the lobby — so stop the
+  // soundtrack. Without this it would keep looping for the last survivor (whose
+  // track was never silenced by elimination) while everyone waits to start
+  // again. The next round's GO restart brings it back.
   useEffect(() => {
     if (active) return;
     const audio = audioRef.current;

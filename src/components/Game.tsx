@@ -34,6 +34,9 @@ type GameProps = {
   winnerTeam: TeamId | null;
   detector: ReturnType<typeof useShakeDetector>;
   lastReaction: { reaction: Reaction; at: number } | null;
+  // Maps a server timestamp into this client's clock (RTT-synced, the same
+  // offset the music uses), so countdowns run in lockstep across devices.
+  toLocalTime: (serverTs: number) => number;
   onEliminate: () => void;
   onReaction: (reaction: Reaction) => void;
   // Post-game: the winner stays on screen and the lobby slides up from below
@@ -45,7 +48,10 @@ type GameProps = {
 
 export function Game(props: GameProps) {
   const { phase } = props;
-  if (phase === 'ready') return <ReadyView readyEndsAt={props.readyEndsAt} />;
+  if (phase === 'ready')
+    return (
+      <ReadyView readyEndsAt={props.readyEndsAt} toLocalTime={props.toLocalTime} />
+    );
   if (phase === 'jousting') return <JoustingView {...props} />;
   return <WinnerView {...props} />;
 }
@@ -53,10 +59,20 @@ export function Game(props: GameProps) {
 // Get Ready: a synced countdown on the neutral staff background. A small tick
 // each second, a larger buzz on "Go". The server flips everyone to jousting
 // when the timer ends.
-function ReadyView({ readyEndsAt }: { readyEndsAt: number | null }) {
+function ReadyView({
+  readyEndsAt,
+  toLocalTime,
+}: {
+  readyEndsAt: number | null;
+  toLocalTime: (serverTs: number) => number;
+}) {
   const { t } = useI18n();
+  // readyEndsAt is a server timestamp — convert it to local time with the same
+  // RTT-synced offset the music uses, so the countdown counts down (and the
+  // ticks land) at the same real instant on every device.
+  const localEndsAt = readyEndsAt === null ? null : toLocalTime(readyEndsAt);
   const [secondsLeft, setSecondsLeft] = useState(() =>
-    readyEndsAt ? Math.max(0, Math.ceil((readyEndsAt - Date.now()) / 1000)) : 0,
+    localEndsAt ? Math.max(0, Math.ceil((localEndsAt - Date.now()) / 1000)) : 0,
   );
 
   // Tracks the last second we buzzed for, so each boundary fires its haptic
@@ -66,9 +82,9 @@ function ReadyView({ readyEndsAt }: { readyEndsAt: number | null }) {
   const lastTickRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (readyEndsAt === null) return;
+    if (localEndsAt === null) return;
     const tick = () => {
-      const s = Math.max(0, Math.ceil((readyEndsAt - Date.now()) / 1000));
+      const s = Math.max(0, Math.ceil((localEndsAt - Date.now()) / 1000));
       setSecondsLeft(s);
       if (s > 0 && lastTickRef.current !== s) {
         lastTickRef.current = s;
@@ -78,7 +94,7 @@ function ReadyView({ readyEndsAt }: { readyEndsAt: number | null }) {
     tick();
     const id = window.setInterval(tick, 200);
     return () => window.clearInterval(id);
-  }, [readyEndsAt]);
+  }, [localEndsAt]);
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 bg-staff text-ink">
@@ -171,6 +187,7 @@ function WinnerView({
   winnerTeam,
   winnerEndsAt,
   lastReaction,
+  toLocalTime,
   onReaction,
   postGame,
   lobbySheet,
@@ -184,17 +201,20 @@ function WinnerView({
     ? me?.team === winnerTeam
     : winnerId !== null && winnerId === myId;
 
+  // Server timestamp → local clock (RTT-synced), so the back-to-lobby countdown
+  // matches across devices.
+  const localEndsAt = winnerEndsAt === null ? null : toLocalTime(winnerEndsAt);
   const [secondsLeft, setSecondsLeft] = useState(() =>
-    winnerEndsAt ? Math.max(0, Math.ceil((winnerEndsAt - Date.now()) / 1000)) : 0,
+    localEndsAt ? Math.max(0, Math.ceil((localEndsAt - Date.now()) / 1000)) : 0,
   );
   useEffect(() => {
-    if (winnerEndsAt === null) return;
+    if (localEndsAt === null) return;
     const tick = () =>
-      setSecondsLeft(Math.max(0, Math.ceil((winnerEndsAt - Date.now()) / 1000)));
+      setSecondsLeft(Math.max(0, Math.ceil((localEndsAt - Date.now()) / 1000)));
     tick();
     const id = window.setInterval(tick, 250);
     return () => window.clearInterval(id);
-  }, [winnerEndsAt]);
+  }, [localEndsAt]);
 
   const header = (
     <div className="relative z-30 flex flex-col items-center gap-2">

@@ -41,17 +41,20 @@
     animation: reaction-float 1.8s ease-out forwards;
   }
 
-  /* Post-game: the lobby panel slides up from below the winner screen. */
+  /* Post-game: the lobby panel slides up from below the winner screen while
+     fading in, so the match soundtrack can ride out over the transition. */
   @keyframes sheet-up {
     from {
       transform: translateY(100%);
+      opacity: 0;
     }
     to {
       transform: translateY(0);
+      opacity: 1;
     }
   }
   .animate-sheet-up {
-    animation: sheet-up 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+    animation: sheet-up 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;
   }
 
   /* Post-game: the winner banner lingers a beat as the lobby slides up, then
