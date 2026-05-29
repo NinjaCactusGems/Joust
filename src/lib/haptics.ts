@@ -6,8 +6,9 @@
 // `vibrate(n)` but silently ignore pattern arrays, and very short pulses
 // (<~80ms) are dropped. Durations scale small -> large for tick/go/elimination.
 export const haptics = {
-  // Small per-second tick during the "Get Ready" countdown.
-  tick: () => navigator.vibrate?.(100),
+  // Small, light per-second tick during the "Get Ready" countdown — the
+  // smallest of the three, building up to the Go/elimination buzzes.
+  tick: () => navigator.vibrate?.(120),
   // Larger buzz on "Go".
   go: () => navigator.vibrate?.(300),
   // Big, unmistakable buzz when a player is eliminated.
