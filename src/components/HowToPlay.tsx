@@ -111,15 +111,17 @@ function BulletFigure({ n }: { n: 1 | 2 | 3 | 4 }) {
   if (n === 1) {
     return (
       <svg {...base} className={ink}>
-        <line x1="26" y1="40" x2="70" y2="40" />
-        <circle cx="40" cy="12" r="5" />
-        <circle cx="43" cy="10" {...eye} />
-        <line x1="40" y1="17" x2="40" y2="30" />
+        <line x1="24" y1="40" x2="72" y2="40" />
+        <circle cx="40" cy="13" r="5" />
+        <circle cx="43" cy="11" {...eye} />
+        <line x1="40" y1="18" x2="40" y2="30" />
         <line x1="40" y1="30" x2="35" y2="40" />
         <line x1="40" y1="30" x2="45" y2="40" />
-        <path d="M40 20 q11 -3 20 1" />
-        <path d="M40 22 q11 2 20 6" />
-        <rect x="60" y="20" width="6" height="11" rx="1.5" />
+        {/* arms sweep out into a wide welcoming arc — one hand keeps rivals at
+            distance, the other holds the phone away from the body */}
+        <path d="M40 21 q-14 -1 -24 -9" />
+        <path d="M40 21 q14 -1 24 -9" />
+        <rect x="61" y="7" width="6" height="11" rx="1.5" />
       </svg>
     );
   }
@@ -128,22 +130,22 @@ function BulletFigure({ n }: { n: 1 | 2 | 3 | 4 }) {
   if (n === 2) {
     return (
       <svg {...base} className={ink}>
-        {/* background player — smaller, set back, facing right */}
+        {/* background player — smaller, set back, facing right, arms open */}
         <circle cx="20" cy="15" r="3.5" />
         <circle cx="22.2" cy="14.5" r="0.9" fill="currentColor" stroke="none" />
         <line x1="20" y1="18.5" x2="20" y2="27" />
         <line x1="20" y1="27" x2="16" y2="34" />
         <line x1="20" y1="27" x2="24" y2="34" />
-        <line x1="20" y1="21" x2="26" y2="22" />
-        <line x1="20" y1="21" x2="14" y2="23" />
-        {/* foreground player — larger, facing left */}
+        <path d="M20 20 q-6 -1 -10 -5" />
+        <path d="M20 20 q6 -1 10 -5" />
+        {/* foreground player — larger, facing left, same wide welcome pose */}
         <circle cx="66" cy="12" r="5.5" />
         <circle cx="62.3" cy="11" {...eye} />
         <line x1="66" y1="17.5" x2="66" y2="32" />
         <line x1="66" y1="32" x2="60" y2="42" />
         <line x1="66" y1="32" x2="72" y2="42" />
-        <line x1="66" y1="21" x2="57" y2="24" />
-        <line x1="66" y1="21" x2="75" y2="23" />
+        <path d="M66 21 q-12 -1 -22 -8" />
+        <path d="M66 21 q12 -1 22 -8" />
       </svg>
     );
   }
@@ -160,8 +162,8 @@ function BulletFigure({ n }: { n: 1 | 2 | 3 | 4 }) {
         <path d="M58 42 q3 -12 12 -17" />
         <rect x="66" y="11" width="13" height="17" rx="2.5" />
         <rect x="68.5" y="13.5" width="8" height="12" rx="1" fill="var(--color-eliminated)" stroke="none" />
-        {/* a rival's arm reaching in to tap the forearm */}
-        <path d="M94 41 q-12 -2 -24 -9" />
+        {/* a rival's arm reaching in to tap the red-phone forearm */}
+        <path d="M94 40 q-15 0 -31 -8" />
         {/* vibration swirls around the red phone */}
         <path d="M62 9 q-3 3 0 7" />
         <path d="M83 9 q3 3 0 7" />
@@ -179,10 +181,8 @@ function BulletFigure({ n }: { n: 1 | 2 | 3 | 4 }) {
       <line x1="48" y1="16" x2="48" y2="30" />
       <line x1="48" y1="30" x2="43" y2="40" />
       <line x1="48" y1="30" x2="53" y2="40" />
-      <line x1="48" y1="19" x2="40" y2="8" />
-      <line x1="48" y1="19" x2="56" y2="8" />
-      <path d="M37 6 l-2 -3" />
-      <path d="M59 6 l2 -3" />
+      {/* both arms as one connected stroke through the shoulders, raised */}
+      <path d="M40 8 L48 19 L56 8" />
     </svg>
   );
 }
