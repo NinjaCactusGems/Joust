@@ -53,23 +53,19 @@ function ReadyView({ readyEndsAt }: { readyEndsAt: number | null }) {
   );
 
   // Tracks the last second we buzzed for, so each boundary fires its haptic
-  // exactly once (the 200ms interval visits each second multiple times).
+  // exactly once (the 200ms interval visits each second multiple times). The
+  // "Go" buzz is fired by JoustingView on mount instead — the countdown
+  // reaching 0 here races the server's jousting message and is unreliable.
   const lastTickRef = useRef<number | null>(null);
-  const wentRef = useRef(false);
 
   useEffect(() => {
     if (readyEndsAt === null) return;
     const tick = () => {
       const s = Math.max(0, Math.ceil((readyEndsAt - Date.now()) / 1000));
       setSecondsLeft(s);
-      if (s > 0) {
-        if (lastTickRef.current !== s) {
-          lastTickRef.current = s;
-          haptics.tick();
-        }
-      } else if (!wentRef.current) {
-        wentRef.current = true;
-        haptics.go();
+      if (s > 0 && lastTickRef.current !== s) {
+        lastTickRef.current = s;
+        haptics.tick();
       }
     };
     tick();
@@ -113,6 +109,12 @@ function JoustingView({
   const startedAtRef = useRef<number>(Date.now());
   // Fire elimination at most once per round (the view remounts each round).
   const firedRef = useRef(false);
+
+  // "Go" buzz: fired here (rather than at the countdown's racy 0) so it
+  // reliably lands exactly when jousting begins.
+  useEffect(() => {
+    haptics.go();
+  }, []);
 
   useEffect(() => {
     if (firedRef.current || iAmOut) return;
