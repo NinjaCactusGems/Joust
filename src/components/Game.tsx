@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { MusicNotes } from './MusicNotes';
 import { haptics } from '../lib/haptics';
+import { sfx } from '../lib/sfx';
 import type { useShakeDetector } from '../hooks/useShakeDetector';
 
 export type Phase = 'lobby' | 'ready' | 'jousting' | 'winner';
@@ -123,6 +124,7 @@ function JoustingView({
     if (detector.lastShakeAt <= startedAtRef.current) return;
     firedRef.current = true;
     haptics.elimination();
+    sfx.screech();
     onEliminate();
   }, [detector.lastShakeAt, iAmOut, onEliminate]);
 
