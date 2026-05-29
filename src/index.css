@@ -15,7 +15,44 @@
   --color-go:    #4F6F52; /* connected / create */
   --color-ochre: #9A7B2E; /* connecting */
 
+  /* full-screen jousting fields — readable across a room */
+  --color-olive:      #6B7A3F; /* still in (distinct from go #4F6F52) */
+  --color-eliminated: #8A2B22; /* out (distinct from accent burgundy #7A2E2E) */
+
   --font-serif: ui-serif, Georgia, "Times New Roman", Cambria, serif;
+}
+
+@layer utilities {
+  /* Reaction emoji particle: drifts up the screen while fading out. */
+  @keyframes reaction-float {
+    0% {
+      transform: translateY(0) scale(0.6);
+      opacity: 0;
+    }
+    15% {
+      opacity: 1;
+    }
+    100% {
+      transform: translateY(-70vh) scale(1.2);
+      opacity: 0;
+    }
+  }
+  .animate-reaction-float {
+    animation: reaction-float 1.8s ease-out forwards;
+  }
+
+  /* Post-game: the lobby panel slides up from below the winner screen. */
+  @keyframes sheet-up {
+    from {
+      transform: translateY(100%);
+    }
+    to {
+      transform: translateY(0);
+    }
+  }
+  .animate-sheet-up {
+    animation: sheet-up 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
 }
 
 @layer components {

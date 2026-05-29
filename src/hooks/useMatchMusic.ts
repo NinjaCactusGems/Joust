@@ -34,22 +34,23 @@ function fade(
 /**
  * Plays the match soundtrack, looping, in sync across clients.
  *
- * Each time a new match starts (a fresh, non-null `matchEndsAt`), playback is
- * (re)seeked to `getOffsetSec()` — the one-way network latency (half the
- * round-trip) — so that, accounting for the time the start message spent in
- * flight, every client lands on the same position in the track.
+ * Each time a new round starts (a fresh, non-null `roundSignal` — the server's
+ * "Get Ready" countdown timestamp), playback is (re)seeked to `getOffsetSec()`
+ * — the one-way network latency (half the round-trip) — so that, accounting for
+ * the time the start message spent in flight, every client lands on the same
+ * position in the track.
  *
- * The track keeps looping after the match ends (through the lobby) so there is
- * no long gap between rounds. It fades out only when the next round starts
+ * The track keeps looping after the round ends (through winner + lobby) so there
+ * is no long gap between rounds. It fades out only when the next round starts
  * (a brief dip before re-syncing) or when the room is left (unmount).
  */
 export function useMatchMusic(
-  matchEndsAt: number | null,
+  roundSignal: number | null,
   getOffsetSec: () => number,
 ) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const cancelFadeRef = useRef<(() => void) | null>(null);
-  const lastMatchRef = useRef<number | null>(null);
+  const lastRoundRef = useRef<number | null>(null);
 
   // Create the element once and unlock autoplay on the first user gesture.
   useEffect(() => {
@@ -101,11 +102,11 @@ export function useMatchMusic(
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
-    if (matchEndsAt == null || matchEndsAt === lastMatchRef.current) {
-      // Match ended (kept looping) or an unrelated state update — do nothing.
+    if (roundSignal == null || roundSignal === lastRoundRef.current) {
+      // Round ended (kept looping) or an unrelated state update — do nothing.
       return;
     }
-    lastMatchRef.current = matchEndsAt;
+    lastRoundRef.current = roundSignal;
     cancelFadeRef.current?.();
 
     const begin = () => {
@@ -134,5 +135,5 @@ export function useMatchMusic(
     }
     // getOffsetSec is read lazily inside begin(); excluded to avoid restarts.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [matchEndsAt]);
+  }, [roundSignal]);
 }

@@ -3,15 +3,24 @@ import usePartySocket from 'partysocket/react';
 import { QRCodeSVG } from 'qrcode.react';
 import { generateRoomCode, normalizeRoomCode } from '../lib/roomCode';
 import { generateRandomName } from '../lib/names';
+import { Game, type Phase, type Reaction } from './Game';
+import { useShakeDetector } from '../hooks/useShakeDetector';
 import { useMatchMusic } from '../hooks/useMatchMusic';
-import { Match } from './Match';
 
 const PARTY_HOST = import.meta.env.VITE_PARTY_HOST || 'localhost:1999';
 
-const PLAYER_ID_KEY = 'joust:playerId';
 const PLAYER_NAME_KEY = 'joust:playerName';
 
-type Player = { id: string; name: string; ready: boolean };
+// Jousting watches motion at the Normal/medium threshold (7 m/s², per CLAUDE.md).
+const JOUST_THRESHOLD = 7;
+
+type Player = {
+  id: string;
+  name: string;
+  ready: boolean;
+  eliminated: boolean;
+  away: boolean;
+};
 
 type LobbyState =
   | { phase: 'idle' }
@@ -23,18 +32,6 @@ function readRoomFromUrl(): string | null {
   if (!code) return null;
   const normalized = normalizeRoomCode(code);
   return normalized.length >= 3 ? normalized : null;
-}
-
-// Stable identity so the server can tell connections apart and the client can
-// recognise its own entity. Persisted so a reload keeps the same name.
-function getPlayerId(): string {
-  if (typeof window === 'undefined') return 'anon';
-  let id = window.localStorage.getItem(PLAYER_ID_KEY);
-  if (!id) {
-    id = crypto.randomUUID();
-    window.localStorage.setItem(PLAYER_ID_KEY, id);
-  }
-  return id;
 }
 
 function getPlayerName(): string {
@@ -140,18 +137,36 @@ function IdleLobby({ onEnter }: { onEnter: (code: string) => void }) {
 }
 
 function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
-  const myId = useMemo(() => getPlayerId(), []);
+  // Per-mount connection id: each tab/Room mount gets its own. Sharing one id
+  // across browser tabs (e.g. via localStorage) collides at the partyserver
+  // layer — the second WS with the same id evicts the first, so only one
+  // tab can stay connected at a time.
+  const myId = useMemo(() => crypto.randomUUID(), []);
   const myName = useRef(getPlayerName());
 
   const [players, setPlayers] = useState<Player[]>([]);
-  const [phase, setPhase] = useState<'lobby' | 'match'>('lobby');
-  const [matchEndsAt, setMatchEndsAt] = useState<number | null>(null);
+  const [phase, setPhase] = useState<Phase>('lobby');
+  const [readyEndsAt, setReadyEndsAt] = useState<number | null>(null);
+  const [winnerEndsAt, setWinnerEndsAt] = useState<number | null>(null);
+  const [winnerId, setWinnerId] = useState<string | null>(null);
+  // The winner we keep showing once the server returns to the lobby, so the
+  // lobby can slide in beneath the celebration. Cleared when a new round starts.
+  const [postGameWinnerId, setPostGameWinnerId] = useState<string | null>(null);
+  const [lastReaction, setLastReaction] = useState<{
+    reaction: Reaction;
+    at: number;
+  } | null>(null);
   const [status, setStatus] = useState<'connecting' | 'open' | 'closed'>(
     'connecting',
   );
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState('');
+
+  // One motion session for the whole room, started on the "I'm ready" gesture
+  // (iOS requires the permission request to come from a user gesture). The
+  // Game overlay reads lastShakeAt from this to detect "moved too fast".
+  const detector = useShakeDetector(JOUST_THRESHOLD);
 
   // Recent round-trip samples (ms), used to synchronise the match soundtrack.
   const rttSamplesRef = useRef<number[]>([]);
@@ -171,15 +186,30 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
       try {
         const data = JSON.parse(event.data) as Partial<{
           type: string;
-          phase: 'lobby' | 'match';
-          matchEndsAt: number | null;
+          phase: Phase;
+          readyEndsAt: number | null;
+          winnerEndsAt: number | null;
+          winnerId: string | null;
           players: Player[];
+          reaction: Reaction;
           t: number;
         }>;
         if (data.type === 'state') {
-          setPhase(data.phase === 'match' ? 'match' : 'lobby');
-          setMatchEndsAt(data.matchEndsAt ?? null);
+          const nextPhase = data.phase ?? 'lobby';
+          setPhase(nextPhase);
+          setReadyEndsAt(data.readyEndsAt ?? null);
+          setWinnerEndsAt(data.winnerEndsAt ?? null);
+          setWinnerId(data.winnerId ?? null);
           setPlayers(Array.isArray(data.players) ? data.players : []);
+          // Remember the winner so the post-game lobby can keep showing it; a
+          // new round (ready/jousting) clears it.
+          if (nextPhase === 'ready' || nextPhase === 'jousting') {
+            setPostGameWinnerId(null);
+          } else if (nextPhase === 'winner' && data.winnerId) {
+            setPostGameWinnerId(data.winnerId);
+          }
+        } else if (data.type === 'reaction' && data.reaction) {
+          setLastReaction({ reaction: data.reaction, at: Date.now() });
         } else if (data.type === 'pong' && typeof data.t === 'number') {
           const rtt = Date.now() - data.t;
           if (rtt >= 0 && rtt < 10000) {
@@ -201,6 +231,22 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
     }
   }, [status, socket]);
 
+  // Broadcast tab visibility so the server can ignore backgrounded players
+  // for the "all ready" gate — otherwise a forgotten tab in the room holds
+  // everyone else hostage waiting for it to ready up.
+  useEffect(() => {
+    if (status !== 'open') return;
+    const send = (visible: boolean) => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'visibility', visible }));
+      }
+    };
+    send(!document.hidden);
+    const onChange = () => send(!document.hidden);
+    document.addEventListener('visibilitychange', onChange);
+    return () => document.removeEventListener('visibilitychange', onChange);
+  }, [status, socket]);
+
   // Probe round-trip time: a quick burst on connect, then a periodic ping.
   useEffect(() => {
     if (status !== 'open') return;
@@ -216,20 +262,23 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
     };
   }, [status, socket]);
 
-  // Synchronised, looping match soundtrack. Offset playback by the one-way
-  // latency so every client lands on the same position when a round starts.
+  // Synchronised, looping match soundtrack. A new round begins with the
+  // "Get Ready" countdown (readyEndsAt); offset playback by the one-way
+  // latency so every client lands on the same position when it starts.
   const getOffsetSec = useCallback(
     () => medianHalfRttSec(rttSamplesRef.current),
     [],
   );
-  useMatchMusic(matchEndsAt, getOffsetSec);
+  useMatchMusic(readyEndsAt, getOffsetSec);
 
   const send = (msg: unknown) => {
     if (status === 'open') socket.send(JSON.stringify(msg));
   };
 
   const me = players.find((p) => p.id === myId);
-  const allReady = players.length > 0 && players.every((p) => p.ready);
+  // Backgrounded tabs are skipped — they neither block start nor count.
+  const activePlayers = players.filter((p) => !p.away);
+  const allReady = activePlayers.length > 0 && activePlayers.every((p) => p.ready);
 
   const shareUrl =
     typeof window !== 'undefined'
@@ -268,11 +317,30 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
     setEditing(false);
   };
 
-  if (phase === 'match' && matchEndsAt) {
-    return <Match endsAt={matchEndsAt} />;
+  // Enabling motion needs a user gesture (iOS); the ready checkbox is one.
+  const onToggleReady = (ready: boolean) => {
+    if (ready) void detector.start();
+    send({ type: 'toggleReady', ready });
+  };
+
+  if (phase !== 'lobby') {
+    return (
+      <Game
+        phase={phase}
+        players={players}
+        myId={myId}
+        readyEndsAt={readyEndsAt}
+        winnerEndsAt={winnerEndsAt}
+        winnerId={winnerId}
+        detector={detector}
+        lastReaction={lastReaction}
+        onEliminate={() => send({ type: 'eliminate' })}
+        onReaction={(reaction) => send({ type: 'reaction', reaction })}
+      />
+    );
   }
 
-  return (
+  const lobbyPanel = (
     <div className="w-full max-w-sm rounded-2xl border border-line bg-paper-raised/80 p-5 flex flex-col gap-4">
       <div className="flex items-baseline justify-between">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-muted">
@@ -317,13 +385,13 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
                     isMe
                       ? 'bg-go/10 ring-1 ring-go/40'
                       : 'bg-paper'
-                  }`}
+                  } ${p.away ? 'opacity-50' : ''}`}
                 >
                   <span
                     className={`h-2 w-2 shrink-0 rounded-full ${
-                      p.ready ? 'bg-go' : 'bg-ink-faint'
+                      p.away ? 'bg-ink-faint' : p.ready ? 'bg-go' : 'bg-ink-faint'
                     }`}
-                    title={p.ready ? 'Ready' : 'Not ready'}
+                    title={p.away ? 'Away' : p.ready ? 'Ready' : 'Not ready'}
                   />
                   {isMe && editing ? (
                     <form
@@ -354,6 +422,11 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
                       <span className="flex-1 truncate text-ink">
                         {p.name}
                       </span>
+                      {p.away && (
+                        <span className="shrink-0 rounded-full bg-line px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-ink-muted">
+                          Away
+                        </span>
+                      )}
                       {isMe && (
                         <>
                           <span className="shrink-0 rounded-full bg-go/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-go">
@@ -381,11 +454,19 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
         <input
           type="checkbox"
           checked={me?.ready ?? false}
-          onChange={(e) => send({ type: 'toggleReady', ready: e.target.checked })}
+          onChange={(e) => onToggleReady(e.target.checked)}
           className="h-4 w-4 accent-go"
         />
         I'm ready
       </label>
+
+      {(detector.permissionState === 'denied' ||
+        detector.permissionState === 'unavailable') && (
+        <p className="-mt-2 text-xs text-accent">
+          Motion sensing is off, so you can't be eliminated. Open
+          joust.ninja-cactus.com on a phone for the full game.
+        </p>
+      )}
 
       <button
         type="button"
@@ -405,6 +486,29 @@ function Room({ code, onLeave }: { code: string; onLeave: () => void }) {
       </button>
     </div>
   );
+
+  // Just won? Keep the winner on screen and slide the lobby up beneath it so
+  // players can keep tapping smileys. Otherwise show the plain lobby.
+  if (postGameWinnerId) {
+    return (
+      <Game
+        phase="winner"
+        players={players}
+        myId={myId}
+        readyEndsAt={null}
+        winnerEndsAt={null}
+        winnerId={postGameWinnerId}
+        detector={detector}
+        lastReaction={lastReaction}
+        onEliminate={() => {}}
+        onReaction={(reaction) => send({ type: 'reaction', reaction })}
+        postGame
+        lobbySheet={lobbyPanel}
+      />
+    );
+  }
+
+  return lobbyPanel;
 }
 
 function StatusBadge({ status }: { status: 'connecting' | 'open' | 'closed' }) {
