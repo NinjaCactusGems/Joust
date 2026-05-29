@@ -112,8 +112,10 @@ export const sfx = {
     };
   },
 
-  // The moment you're eliminated: a guitar/amp "yank" clip, played once at a
-  // slight random pitch so repeated eliminations don't sound identical.
+  // The moment you're eliminated: a loud buzzer clip, played once at a slight
+  // random pitch so repeated eliminations don't sound identical. Driven hot
+  // through a soft clipper so it lands LOUD and cuts across the room without
+  // harsh digital clipping.
   screech() {
     const ac = getCtx();
     if (!ac) return;
@@ -121,10 +123,24 @@ export const sfx = {
       if (!buf) return;
       const src = ac.createBufferSource();
       src.buffer = buf;
-      src.playbackRate.value = 0.94 + Math.random() * 0.12; // ~±1 semitone
-      const gain = ac.createGain();
-      gain.gain.value = 1;
-      src.connect(gain).connect(ac.destination);
+      src.playbackRate.value = 0.96 + Math.random() * 0.08; // slight random pitch
+
+      // Push the clip hard into a tanh soft clipper, then back off at the
+      // master — maximises perceived loudness while taming the peaks.
+      const drive = ac.createGain();
+      drive.gain.value = 2.4;
+      const shaper = ac.createWaveShaper();
+      const n = 1024;
+      const curve = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        const x = (i / (n - 1)) * 2 - 1;
+        curve[i] = Math.tanh(2 * x);
+      }
+      shaper.curve = curve;
+      const master = ac.createGain();
+      master.gain.value = 0.98;
+
+      src.connect(drive).connect(shaper).connect(master).connect(ac.destination);
       src.start();
     });
   },
