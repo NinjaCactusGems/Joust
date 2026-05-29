@@ -169,15 +169,15 @@ function NoteHead({
   r: number;
   dir: 1 | -1;
 }) {
-  const crown = cy - r; // top of the head
+  const stemX = cx + dir * (r - 0.5); // rises from the side of the knob
   const stemTop = cy - 2 * r; // where the hair tuft peaks
   const s = r / 5; // scale the flag to the head size
   return (
     <>
       <circle cx={cx} cy={cy} r={r} fill="currentColor" stroke="none" />
-      <line x1={cx} y1={crown} x2={cx} y2={stemTop} />
+      <line x1={stemX} y1={cy} x2={stemX} y2={stemTop} />
       <path
-        d={`M${cx} ${stemTop} c ${dir * 6 * s} ${s} ${dir * 8 * s} ${5 * s} ${dir * 4 * s} ${10 * s}`}
+        d={`M${stemX} ${stemTop} c ${dir * 6 * s} ${s} ${dir * 8 * s} ${5 * s} ${dir * 4 * s} ${10 * s}`}
       />
     </>
   );
