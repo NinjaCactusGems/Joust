@@ -90,11 +90,11 @@ export function HowToPlay() {
   );
 }
 
-// Faint, abstract humanoid figures — a quiet nod to the sheet-music theme via a
-// tilted note-head for each head — illustrating each rule. Decorative only
-// (aria-hidden), drawn in ink at low opacity so they read as a watermark.
+// Faint humanoid figures illustrating each rule. Decorative only (aria-hidden);
+// the ink figures sit soft under the text, while the green/red phones in #3 are
+// drawn in the game's olive/eliminated colours so the core mechanic reads.
 function BulletFigure({ n }: { n: 1 | 2 | 3 | 4 }) {
-  const common = {
+  const base = {
     viewBox: '0 0 96 44',
     fill: 'none',
     stroke: 'currentColor',
@@ -102,73 +102,87 @@ function BulletFigure({ n }: { n: 1 | 2 | 3 | 4 }) {
     strokeLinecap: 'round' as const,
     strokeLinejoin: 'round' as const,
     'aria-hidden': true,
-    className: 'h-9 w-auto text-ink opacity-[0.14]',
   };
-  const head = { rx: 5, ry: 4, fill: 'currentColor', stroke: 'none' };
+  const ink = 'h-9 w-auto text-ink opacity-40';
+  const eye = { r: 1.3, fill: 'currentColor', stroke: 'none' };
 
-  // 1) A person standing steady, phone held out away from the body.
+  // 1) Standing steady: both arms curved out holding a small phone, eye looking
+  // forward rather than down at the screen.
   if (n === 1) {
     return (
-      <svg {...common}>
-        <line x1="22" y1="40" x2="74" y2="40" />
-        <ellipse cx="42" cy="11" transform="rotate(-18 42 11)" {...head} />
-        <line x1="42" y1="15" x2="42" y2="28" />
-        <line x1="42" y1="28" x2="36" y2="40" />
-        <line x1="42" y1="28" x2="48" y2="40" />
-        <line x1="42" y1="19" x2="60" y2="20" />
-        <rect x="60" y="14" width="9" height="12" rx="1.5" />
+      <svg {...base} className={ink}>
+        <line x1="26" y1="40" x2="70" y2="40" />
+        <circle cx="40" cy="12" r="5" />
+        <circle cx="43" cy="10" {...eye} />
+        <line x1="40" y1="17" x2="40" y2="30" />
+        <line x1="40" y1="30" x2="35" y2="40" />
+        <line x1="40" y1="30" x2="45" y2="40" />
+        <path d="M40 20 q11 -3 20 1" />
+        <path d="M40 22 q11 2 20 6" />
+        <rect x="60" y="20" width="6" height="11" rx="1.5" />
       </svg>
     );
   }
-  // 2) A person dancing / weaving — arms thrown out, mid-stride, with trails.
+  // 2) Dance & weave: two players sizing each other up — one near (larger), one
+  // further back (smaller), eyes on each other.
   if (n === 2) {
     return (
-      <svg {...common}>
-        <path d="M12 16 q7 9 0 18" />
-        <path d="M22 14 q8 10 1 20" />
-        <ellipse cx="46" cy="11" transform="rotate(-18 46 11)" {...head} />
-        <line x1="46" y1="15" x2="52" y2="27" />
-        <line x1="52" y1="27" x2="46" y2="40" />
-        <line x1="52" y1="27" x2="62" y2="37" />
-        <line x1="48" y1="18" x2="58" y2="8" />
-        <line x1="48" y1="19" x2="36" y2="24" />
+      <svg {...base} className={ink}>
+        {/* background player — smaller, set back, facing right */}
+        <circle cx="20" cy="15" r="3.5" />
+        <circle cx="22.2" cy="14.5" r="0.9" fill="currentColor" stroke="none" />
+        <line x1="20" y1="18.5" x2="20" y2="27" />
+        <line x1="20" y1="27" x2="16" y2="34" />
+        <line x1="20" y1="27" x2="24" y2="34" />
+        <line x1="20" y1="21" x2="26" y2="22" />
+        <line x1="20" y1="21" x2="14" y2="23" />
+        {/* foreground player — larger, facing left */}
+        <circle cx="66" cy="12" r="5.5" />
+        <circle cx="62.3" cy="11" {...eye} />
+        <line x1="66" y1="17.5" x2="66" y2="32" />
+        <line x1="66" y1="32" x2="60" y2="42" />
+        <line x1="66" y1="32" x2="72" y2="42" />
+        <line x1="66" y1="21" x2="57" y2="24" />
+        <line x1="66" y1="21" x2="75" y2="23" />
       </svg>
     );
   }
-  // 3) One person shoving another, who topples over.
+  // 3) Tap a rival: a calm olive-screen phone, and a red-screen one whose arm
+  // was tapped — vibration swirling around it (the "you're out" moment).
   if (n === 3) {
     return (
-      <svg {...common}>
-        <line x1="8" y1="40" x2="88" y2="40" />
-        <ellipse cx="22" cy="12" transform="rotate(-18 22 12)" {...head} />
-        <line x1="22" y1="16" x2="22" y2="30" />
-        <line x1="22" y1="30" x2="17" y2="40" />
-        <line x1="22" y1="30" x2="27" y2="40" />
-        <line x1="22" y1="21" x2="38" y2="19" />
-        <g transform="rotate(48 64 30)">
-          <ellipse cx="64" cy="12" {...head} />
-          <line x1="64" y1="16" x2="64" y2="30" />
-          <line x1="64" y1="30" x2="59" y2="40" />
-          <line x1="64" y1="30" x2="69" y2="40" />
-          <line x1="64" y1="20" x2="74" y2="16" />
-        </g>
+      <svg {...base} className="h-10 w-auto text-ink opacity-90">
+        {/* still in: arm holding an olive-screen phone */}
+        <path d="M12 42 q3 -12 12 -17" />
+        <rect x="20" y="11" width="13" height="17" rx="2.5" />
+        <rect x="22.5" y="13.5" width="8" height="12" rx="1" fill="var(--color-olive)" stroke="none" />
+        {/* out: arm holding a red-screen phone, just tapped, buzzing */}
+        <path d="M58 42 q3 -12 12 -17" />
+        <rect x="66" y="11" width="13" height="17" rx="2.5" />
+        <rect x="68.5" y="13.5" width="8" height="12" rx="1" fill="var(--color-eliminated)" stroke="none" />
+        {/* a rival's arm reaching in to tap the forearm */}
+        <path d="M94 41 q-12 -2 -24 -9" />
+        {/* vibration swirls around the red phone */}
+        <path d="M62 9 q-3 3 0 7" />
+        <path d="M83 9 q3 3 0 7" />
+        <path d="M59 19 q-3 1 -4 4" />
+        <path d="M86 19 q3 1 4 4" />
       </svg>
     );
   }
-  // 4) The last one standing (arms raised) beside a fallen player.
+  // 4) The last one standing, arms raised in celebration.
   return (
-    <svg {...common}>
-      <line x1="8" y1="40" x2="88" y2="40" />
-      <ellipse cx="34" cy="11" transform="rotate(-18 34 11)" {...head} />
-      <line x1="34" y1="15" x2="34" y2="29" />
-      <line x1="34" y1="29" x2="29" y2="40" />
-      <line x1="34" y1="29" x2="39" y2="40" />
-      <line x1="34" y1="18" x2="26" y2="8" />
-      <line x1="34" y1="18" x2="42" y2="8" />
-      <ellipse cx="84" cy="36" transform="rotate(70 84 36)" {...head} />
-      <line x1="80" y1="37" x2="66" y2="35" />
-      <line x1="66" y1="35" x2="60" y2="40" />
-      <line x1="70" y1="36" x2="68" y2="41" />
+    <svg {...base} className={ink}>
+      <line x1="30" y1="40" x2="66" y2="40" />
+      <circle cx="48" cy="11" r="5" />
+      <circle cx="50" cy="10" {...eye} />
+      <line x1="48" y1="16" x2="48" y2="30" />
+      <line x1="48" y1="30" x2="43" y2="40" />
+      <line x1="48" y1="30" x2="53" y2="40" />
+      <line x1="48" y1="19" x2="40" y2="8" />
+      <line x1="48" y1="19" x2="56" y2="8" />
+      <path d="M37 6 l-2 -3" />
+      <path d="M59 6 l2 -3" />
     </svg>
   );
 }
